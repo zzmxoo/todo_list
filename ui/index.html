@@ -136,6 +136,17 @@
         <div class="switch" id="calendarSwitch" role="switch" aria-checked="false"><span></span></div>
       </div>
 
+      <div class="set-row" id="upcomingRow" hidden>
+        <div>
+          <div class="set-label">近期待办</div>
+          <div class="set-desc">日历模式左侧只显示最近几天到期的待办，色条标绿（1–30 天）</div>
+        </div>
+        <div class="upcoming-ctrl">
+          <input class="days-input" id="upcomingDays" type="number" min="1" max="30" step="1" value="7" title="显示天数（1–30）">
+          <div class="switch" id="upcomingSwitch" role="switch" aria-checked="false"><span></span></div>
+        </div>
+      </div>
+
       <div class="set-row">
         <div>
           <div class="set-label">极简模式</div>
@@ -217,6 +228,7 @@
     </div>
   </div>
 </div>
+<script src="core.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

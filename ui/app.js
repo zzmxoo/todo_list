@@ -9,6 +9,8 @@
     bg_color: "#342a72",
     minimal: false,
     calendar: false,
+    upcoming: false,
+    upcoming_days: 7,
     always_on_top: true,
     city: "北京",
     latitude: null,
@@ -57,19 +59,17 @@
     "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十",
   ];
 
-  // 二十四节气：用 1900 年小寒为基准的分钟偏移推算，1900-2100 年与中国日历一致
-  const SOLAR_TERMS = [
-    "小寒", "大寒", "立春", "雨水", "惊蛰", "春分", "清明", "谷雨",
-    "立夏", "小满", "芒种", "夏至", "小暑", "大暑", "立秋", "处暑",
-    "白露", "秋分", "寒露", "霜降", "立冬", "小雪", "大雪", "冬至",
-  ];
-  const SOLAR_TERM_INFO = [
-    0, 21208, 42467, 63836, 85337, 107014, 128867, 150921,
-    173149, 195551, 218072, 240693, 263343, 285989, 308563, 331033,
-    353350, 375494, 397447, 419210, 440795, 462224, 483532, 504758,
-  ];
-  const SOLAR_TERM_BASE = Date.UTC(1900, 0, 6, 2, 5);
-  const SOLAR_TERM_YEAR_MS = 31556925974.7;
+  // 二十四节气等纯函数集中在 core.js
+  const {
+    SOLAR_TERMS,
+    pad2,
+    ymd,
+    startOfDay,
+    solarTermOn,
+    withinUpcoming,
+    clipSegment,
+    layoutBands,
+  } = window.TodoCore;
 
   // 节气弹框背景：深色渐变 + 节气名水印，按季节配一组颜色
   const TERM_THEME = {
@@ -199,6 +199,8 @@
   let cellHoverTimer = null;
   let hoverCell = null;
   let infoHideTimer = null;
+  const weekScroll = new Map();
+  const MAX_BARS = 3;
   const INFO_HIDE_DELAY = 1200;
   let lastQuoteIndex = -1;
   let networkOk = null;
@@ -215,8 +217,6 @@
   let tickCount = 0;
 
   /* ---------------------------------------------------------- utils */
-  const pad2 = (n) => String(n).padStart(2, "0");
-  const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   const hm = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   const nextFrame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
@@ -461,6 +461,9 @@
     els.clearBg = document.getElementById("clearBg");
     els.bgModes = document.getElementById("bgModes");
     els.calendarSwitch = document.getElementById("calendarSwitch");
+    els.upcomingRow = document.getElementById("upcomingRow");
+    els.upcomingDays = document.getElementById("upcomingDays");
+    els.upcomingSwitch = document.getElementById("upcomingSwitch");
     els.minimalSwitch = document.getElementById("minimalSwitch");
     els.topSwitch = document.getElementById("topSwitch");
     els.cityInput = document.getElementById("cityInput");
@@ -558,6 +561,8 @@
     state.settings.bg_color = normalizeHex(state.settings.bg_color, DEFAULT_SETTINGS.bg_color);
     state.settings.minimal = !!state.settings.minimal;
     state.settings.calendar = !!state.settings.calendar;
+    state.settings.upcoming = !!state.settings.upcoming;
+    state.settings.upcoming_days = normalizeUpcomingDays(state.settings.upcoming_days);
     if (!state.settings.holidays || typeof state.settings.holidays !== "object") {
       state.settings.holidays = {};
     }
@@ -791,6 +796,12 @@
     els.opacityValue.textContent = `${transparency}%`;
     els.calendarSwitch.classList.toggle("on", !!s.calendar);
     els.calendarSwitch.setAttribute("aria-checked", String(!!s.calendar));
+    els.upcomingRow.hidden = !s.calendar;
+    setSwitch(els.upcomingSwitch, !!s.upcoming);
+    if (document.activeElement !== els.upcomingDays) {
+      els.upcomingDays.value = String(normalizeUpcomingDays(s.upcoming_days));
+    }
+    els.upcomingDays.disabled = !s.upcoming;
     els.topSwitch.classList.toggle("on", !!s.always_on_top);
     els.topSwitch.setAttribute("aria-checked", String(!!s.always_on_top));
     setSwitch(els.minimalSwitch, !!s.minimal);
@@ -811,6 +822,29 @@
     return '<span class="mark-dot"></span>';
   }
 
+  function normalizeUpcomingDays(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 7;
+    return clamp(Math.round(n), 1, 30);
+  }
+
+  function upcomingDays() {
+    return normalizeUpcomingDays(state.settings.upcoming_days);
+  }
+
+  function upcomingActive() {
+    return !!state.settings.calendar && !!state.settings.upcoming;
+  }
+
+  // 近 N 天内到期（含已超时）的待办；已完成且已过期的不再占用名额外
+  function isUpcomingTodo(todo) {
+    const due = parseDue(todo);
+    if (!due) return false;
+    const now = new Date();
+    if (todo.done && due < startOfDay(now)) return false;
+    return withinUpcoming(due, now, upcomingDays());
+  }
+
   function renderTodos() {
     if (addEditing) {
       addEditing = false;
@@ -818,13 +852,19 @@
       els.addRow.innerHTML = DEFAULT_BODY();
     }
 
-    const list = sortTodos(state.todos);
+    const all = sortTodos(state.todos);
+    // 近期待办模式下保留没有截止时间的事项，避免刚添加就消失
+    const list = upcomingActive()
+      ? all.filter((todo) => !parseDue(todo) || isUpcomingTodo(todo))
+      : all;
     els.todoList.innerHTML = "";
 
     if (!list.length) {
       const hint = document.createElement("div");
       hint.className = "empty-hint";
-      hint.innerHTML = "暂无待办<div class=\"sub\">点击空白处或下方「添加待办」开始记录</div>";
+      hint.innerHTML = upcomingActive()
+        ? `近 ${upcomingDays()} 天暂无待办<div class="sub">可在设置中关闭「近期待办」查看全部</div>`
+        : "暂无待办<div class=\"sub\">点击空白处或下方「添加待办」开始记录</div>";
       els.todoList.appendChild(hint);
     }
 
@@ -832,15 +872,20 @@
       els.todoList.appendChild(buildRow(todo));
     }
 
-    const remaining = state.todos.filter((todo) => !todo.done).length;
-    els.count.textContent = state.todos.length ? `${remaining} 项` : "";
+    const remaining = list.filter((todo) => !todo.done).length;
+    els.count.textContent = list.length ? `${remaining} 项` : "";
     renderCalendar();
   }
 
   function buildRow(todo) {
     const row = document.createElement("div");
     const status = dueState(todo);
-    row.className = "todo-row" + (todo.done ? " done" : "") + (status === "overdue" ? " overdue" : "");
+    row.className =
+      "todo-row" +
+      (todo.done ? " done" : "") +
+      (status === "overdue" ? " overdue" : "") +
+      (status === "soon" ? " soon" : "") +
+      (upcomingActive() && isUpcomingTodo(todo) ? " upcoming" : "");
     row.dataset.id = todo.id;
 
     const mark = document.createElement("span");
@@ -875,6 +920,7 @@
       const status = dueState(todo);
       row.classList.toggle("done", !!todo.done);
       row.classList.toggle("overdue", status === "overdue");
+      row.classList.toggle("soon", status === "soon");
       const mark = row.querySelector(".status");
       if (mark) {
         mark.className = `status ${status}`;
@@ -1399,8 +1445,6 @@
   }
 
   /* ---------------------------------------------------------- calendar */
-  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
   function eventRangeText(start, end) {
     const left = `${start.getMonth() + 1}月${start.getDate()}日 ${hm(start)}`;
     const right = `${end.getMonth() + 1}月${end.getDate()}日 ${hm(end)}`;
@@ -1428,20 +1472,7 @@
     }
   }
 
-  // 返回某天对应的节气名，不是节气当天则返回空字符串
-  function solarTermOn(date) {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const day = date.getDate();
-    for (const index of [month * 2, month * 2 + 1]) {
-      const at = new Date(SOLAR_TERM_BASE + SOLAR_TERM_YEAR_MS * (year - 1900) + SOLAR_TERM_INFO[index] * 60000);
-      if (at.getUTCFullYear() === year && at.getUTCMonth() === month && at.getUTCDate() === day) {
-        return SOLAR_TERMS[index];
-      }
-    }
-    return "";
-  }
-
+  // 节气弹框背景：按节气名生成一张深色渐变 + 季节图案的 SVG
   function solarTermArt(term) {
     if (TERM_BG_CACHE.has(term)) return TERM_BG_CACHE.get(term);
     const index = SOLAR_TERMS.indexOf(term);
@@ -1538,6 +1569,16 @@
   function cancelInfoHide() {
     clearTimeout(infoHideTimer);
     infoHideTimer = null;
+  }
+
+  // 色条会盖住日期格，双击时按坐标找回下面的格子
+  function cellAtPoint(x, y) {
+    if (!els.calGrid) return null;
+    for (const cell of els.calGrid.querySelectorAll(".cal-cell")) {
+      const rect = cell.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return cell;
+    }
+    return null;
   }
 
   // 鼠标离开日期格后延迟消失；期间若移到弹框上则保留
@@ -1715,6 +1756,8 @@
     }
 
     const holidayByDay = holidayMap();
+    const monthStart = new Date(y, m, 1);
+    const monthEnd = new Date(y, m + 1, 0);
 
     let monthCount = 0;
     const monthPrefix = `${y}-${pad2(m + 1)}`;
@@ -1730,7 +1773,6 @@
     const gridStart = new Date(y, m, 1 - offset);
     const todayKey = ymd(new Date());
     const DAY_MS = 86400000;
-    const MAX_LANES = 3;
 
     els.calGrid.innerHTML = "";
 
@@ -1795,69 +1837,87 @@
         week.appendChild(cell);
       }
 
-      // 计算这一周内与事项区间相交的片段
+      // 计算这一周内与事项区间相交的片段（只绘制本月内的部分）
       const segments = [];
       for (const ev of events) {
-        const from = ev.startDay < weekStart ? weekStart : ev.startDay;
-        const to = ev.endDay > weekEnd ? weekEnd : ev.endDay;
-        if (to < weekStart || from > weekEnd) continue;
-        const col = clamp(Math.round((from - weekStart) / DAY_MS), 0, 6);
-        const span = clamp(Math.round((to - from) / DAY_MS) + 1, 1, 7 - col);
+        const clip = clipSegment(ev.startDay, ev.endDay, weekStart, weekEnd, monthStart, monthEnd);
+        if (!clip) continue;
+        const col = clamp(Math.round((clip.from - weekStart) / DAY_MS), 0, 6);
+        const span = clamp(Math.round((clip.to - clip.from) / DAY_MS) + 1, 1, 7 - col);
         segments.push({
           ev,
           col,
           span,
-          cutLeft: ev.startDay < weekStart,
-          cutRight: ev.endDay > weekEnd,
+          cutLeft: ev.startDay < clip.from,
+          cutRight: ev.endDay > clip.to,
         });
       }
       segments.sort((a, b) => a.col - b.col || b.span - a.span);
-
-      const overlay = document.createElement("div");
-      overlay.className = "cal-bars";
-      overlay.setAttribute("data-tauri-drag-region", "");
-
-      // 同一周内重叠的事项逐行下排
-      const laneEnds = [];
-      let hiddenCount = 0;
-      for (const seg of segments) {
-        let lane = 0;
-        while (lane < laneEnds.length && laneEnds[lane] >= seg.col) lane += 1;
-        if (lane >= MAX_LANES) {
-          hiddenCount += 1;
-          continue;
-        }
-        laneEnds[lane] = seg.col + seg.span - 1;
-
-        const bar = document.createElement("div");
-        bar.className =
-          `cal-bar c${seg.ev.color}` +
-          (seg.cutLeft ? " cut-left" : "") +
-          (seg.cutRight ? " cut-right" : "") +
-          (seg.ev.todo.done ? " done" : "");
-        bar.style.setProperty("--col", String(seg.col));
-        bar.style.setProperty("--span", String(seg.span));
-        bar.style.top = `${18 + lane * 11}px`;
-        bar.textContent = seg.ev.todo.text;
-
-        const duration = todoDuration(seg.ev.todo, seg.ev.end);
-        bar.title =
-          `${seg.ev.todo.text}\n${eventRangeText(seg.ev.start, seg.ev.end)}` +
-          (duration ? ` · 时长 ${duration}` : "");
-        bar.setAttribute("data-tauri-drag-region", "");
-        overlay.appendChild(bar);
-      }
-
-      if (hiddenCount) {
-        const more = document.createElement("span");
-        more.className = "cal-bar-more";
-        more.textContent = `+${hiddenCount}`;
-        overlay.appendChild(more);
-      }
-
-      week.appendChild(overlay);
+      paintWeekBands(week, segments, weekStart);
       els.calGrid.appendChild(week);
     }
+  }
+
+  // 绘制一周的事项色条；滚轮滚动时只重绘这一周
+  function paintWeekBands(week, segments, weekStart) {
+    const nearIds = upcomingActive()
+      ? new Set(state.todos.filter(isUpcomingTodo).map((todo) => todo.id))
+      : null;
+    const overlay = document.createElement("div");
+    overlay.className = "cal-bars";
+    overlay.setAttribute("data-tauri-drag-region", "");
+
+    // 同一周内重叠的事项逐行下排；最多同时显示 MAX_BARS 行
+    const weekKey = ymd(weekStart);
+    const bands = layoutBands(segments, MAX_BARS, weekScroll.get(weekKey) || 0);
+    const laneOffset = bands.offset;
+    week.dataset.maxOffset = String(bands.maxOffset);
+    if (laneOffset) weekScroll.set(weekKey, laneOffset);
+    else weekScroll.delete(weekKey);
+    const aboveCount = bands.above;
+    const belowCount = bands.below;
+
+    for (const seg of bands.placed) {
+      if (seg.lane < laneOffset || seg.lane >= laneOffset + MAX_BARS) continue;
+
+      const bar = document.createElement("div");
+      bar.className =
+        `cal-bar c${seg.ev.color}` +
+        (seg.cutLeft ? " cut-left" : "") +
+        (seg.cutRight ? " cut-right" : "") +
+        (seg.ev.todo.done ? " done" : "") +
+        (nearIds && nearIds.has(seg.ev.todo.id) ? " upcoming" : "");
+      bar.style.setProperty("--col", String(seg.col));
+      bar.style.setProperty("--span", String(seg.span));
+      bar.style.top = `${18 + (seg.lane - laneOffset) * 11}px`;
+      bar.textContent = seg.ev.todo.text;
+
+      const duration = todoDuration(seg.ev.todo, seg.ev.end);
+      bar.title =
+        `${seg.ev.todo.text}\n${eventRangeText(seg.ev.start, seg.ev.end)}` +
+        (duration ? ` · 时长 ${duration}` : "");
+      bar.setAttribute("data-tauri-drag-region", "");
+      overlay.appendChild(bar);
+    }
+
+    // 上面 / 下面还有几条：贴在每一个日期格对应行末
+    const addBadge = (col, top, text, kind) => {
+      const badge = document.createElement("span");
+      badge.className = `cal-bar-badge ${kind}`;
+      badge.style.setProperty("--col", String(col));
+      badge.style.top = `${top}px`;
+      badge.textContent = text;
+      overlay.appendChild(badge);
+    };
+    for (let c = 0; c < 7; c += 1) {
+      if (aboveCount[c]) addBadge(c, 18, `+${aboveCount[c]}`, "above");
+      if (belowCount[c]) addBadge(c, 18 + (MAX_BARS - 1) * 11, `+${belowCount[c]}`, "below");
+    }
+
+    const old = week.querySelector(".cal-bars");
+    if (old) old.remove();
+    week.appendChild(overlay);
+    week._bands = { segments, weekStart };
   }
 
   /* ---------------------------------------------------------- settings */
@@ -1911,9 +1971,10 @@
     setSwitch(els.minimalSwitch, state.settings.minimal);
     document.body.classList.toggle("calendar-mode", state.settings.calendar);
     document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
+    els.upcomingRow.hidden = !state.settings.calendar;
     save();
+    renderTodos();
     if (!settingsOpen) {
-      renderCalendar();
       await scheduleLayout();
     }
   }
@@ -2132,13 +2193,36 @@
       scheduleLayout();
     });
 
-    // 双击日期格：在格子上弹出添加待办
+    // 双击日期格：在格子上弹出添加待办（色条盖住格子时也能触发）
     els.calGrid.addEventListener("dblclick", (event) => {
-      const cell = event.target.closest(".cal-cell");
+      const cell =
+        event.target.closest(".cal-cell") || cellAtPoint(event.clientX, event.clientY);
       if (!cell || !cell.dataset.date) return;
       event.preventDefault();
       openCalAdd(cell);
     });
+
+    // 滚轮浏览日期格内超出的待办：每周独立滚动，最多同时显示 3 条
+    els.calGrid.addEventListener(
+      "wheel",
+      (event) => {
+        const week = event.target.closest(".cal-week");
+        if (!week || !week._bands) return;
+        const maxOffset = Number(week.dataset.maxOffset || 0);
+        if (maxOffset <= 0) return;
+        const step = Math.sign(event.deltaY);
+        if (!step) return;
+        event.preventDefault();
+        const weekStart = week._bands.weekStart;
+        const key = ymd(weekStart);
+        const current = weekScroll.get(key) || 0;
+        const next = clamp(current + step, 0, maxOffset);
+        if (next === current) return;
+        weekScroll.set(key, next);
+        paintWeekBands(week, week._bands.segments, weekStart);
+      },
+      { passive: false }
+    );
 
     // 在日期格上停留 3 秒显示农历 / 天气 / 每日一句；移走后延迟 1.2 秒消失
     els.calGrid.addEventListener("mouseover", (event) => {
@@ -2256,8 +2340,26 @@
       setSwitch(els.calendarSwitch, state.settings.calendar);
       document.body.classList.toggle("calendar-mode", state.settings.calendar);
       document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
+      els.upcomingRow.hidden = !state.settings.calendar;
       save();
+      renderTodos();
       if (!settingsOpen) scheduleLayout();
+    });
+
+    els.upcomingSwitch.addEventListener("click", () => {
+      state.settings.upcoming = !state.settings.upcoming;
+      setSwitch(els.upcomingSwitch, state.settings.upcoming);
+      els.upcomingDays.disabled = !state.settings.upcoming;
+      save();
+      renderTodos();
+    });
+
+    els.upcomingDays.addEventListener("change", () => {
+      const days = normalizeUpcomingDays(els.upcomingDays.value);
+      els.upcomingDays.value = String(days);
+      state.settings.upcoming_days = days;
+      save();
+      renderTodos();
     });
 
     els.bgModes.addEventListener("click", (event) => {
