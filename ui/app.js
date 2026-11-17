@@ -199,7 +199,7 @@
   let cellHoverTimer = null;
   let hoverCell = null;
   let infoHideTimer = null;
-  const INFO_HIDE_DELAY = 800;
+  const INFO_HIDE_DELAY = 1200;
   let lastQuoteIndex = -1;
   let networkOk = null;
   let calPress = null;
@@ -2140,7 +2140,7 @@
       openCalAdd(cell);
     });
 
-    // 在日期格上停留 3 秒显示农历 / 天气 / 每日一句；移走后延迟 0.5 秒消失
+    // 在日期格上停留 3 秒显示农历 / 天气 / 每日一句；移走后延迟 1.2 秒消失
     els.calGrid.addEventListener("mouseover", (event) => {
       const cell = event.target.closest(".cal-cell");
       if (!cell) return;
@@ -2172,6 +2172,18 @@
 
     els.calGrid.addEventListener("mouseleave", () => scheduleHideCalInfo());
     els.calGrid.addEventListener("pointerdown", () => hideCalInfo());
+
+    // 右键单击日期格：不等待，立即显示日期信息
+    els.calGrid.addEventListener("contextmenu", (event) => {
+      const cell = event.target.closest(".cal-cell");
+      if (!cell || !cell.dataset.date) return;
+      event.preventDefault();
+      const [yy, mm, dd] = cell.dataset.date.split("-").map(Number);
+      if (!yy || !mm || !dd) return;
+      hideCalInfo();
+      hoverCell = cell;
+      showCalInfo(cell, new Date(yy, mm - 1, dd));
+    });
 
     // 光标停留在弹框上时保持显示，离开后同样延迟消失
     els.calInfo.addEventListener("mouseenter", () => cancelInfoHide());
