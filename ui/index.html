@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>桌面待办</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app" class="app" data-tauri-drag-region>
+  <div class="bg-image" id="bgImage" aria-hidden="true"></div>
+  <div class="bg-shade" aria-hidden="true"></div>
+
+  <div class="top-row">
+    <section class="card todo-card" id="todoCard">
+      <header class="todo-header" data-tauri-drag-region>
+        <div class="title-wrap" data-tauri-drag-region>
+          <span class="title">待办清单</span>
+          <span class="count" id="count"></span>
+        </div>
+        <button class="weather-pill" id="weatherPill" title="显示 / 隐藏天气" hidden>
+          <span class="pill-icon" id="pillIcon"></span>
+          <span class="pill-text" id="pillText">--°</span>
+        </button>
+        <button class="icon-btn" id="settingsBtn" title="设置" aria-label="设置">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <path d="M4 7h9M17 7h3M4 17h3M11 17h9"/>
+            <circle cx="15" cy="7" r="2.1"/><circle cx="9" cy="17" r="2.1"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="todo-list" id="todoList"></div>
+
+      <div class="add-row" id="addRow" role="button" tabindex="0">
+        <span class="plus-icon">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </span>
+        <span class="add-text">添加待办</span>
+      </div>
+    </section>
+
+    <aside class="card weather-card" id="weatherCard" hidden>
+      <div class="wc-head">
+        <div class="wc-clock" id="wcClock">--:--</div>
+        <div class="wc-main">
+          <div class="wc-icon" id="wcIcon"></div>
+          <div class="wc-temp-wrap">
+            <div class="wc-temp" id="wcTemp">--°</div>
+            <div class="wc-cond" id="wcCond">获取中…</div>
+          </div>
+        </div>
+        <div class="wc-date" id="wcDate"></div>
+        <div class="wc-hilo" id="wcHilo"></div>
+        <div class="wc-city" id="wcCity"></div>
+        <div class="wc-extra" id="wcExtra"></div>
+      </div>
+      <div class="forecast" id="forecast"></div>
+      <div class="wc-status" id="wcStatus"></div>
+    </aside>
+  </div>
+
+  <section class="card calendar-card" id="calendarCard" hidden data-tauri-drag-region>
+    <div class="cal-header" data-tauri-drag-region>
+      <span class="cal-title" id="calTitle" data-tauri-drag-region></span>
+      <span class="cal-sub" id="calSub" data-tauri-drag-region></span>
+      <div class="cal-nav">
+        <button class="icon-btn small" id="calPrev" title="上个月">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <button class="cal-today" id="calToday">今天</button>
+        <button class="icon-btn small" id="calNext" title="下个月">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="cal-weekdays" data-tauri-drag-region>
+      <span data-tauri-drag-region>一</span><span data-tauri-drag-region>二</span><span data-tauri-drag-region>三</span><span data-tauri-drag-region>四</span><span data-tauri-drag-region>五</span><span data-tauri-drag-region>六</span><span data-tauri-drag-region>日</span>
+    </div>
+    <div class="cal-grid" id="calGrid" data-tauri-drag-region></div>
+  </section>
+
+  <div class="settings-overlay" id="settingsOverlay" hidden>
+    <div class="settings" id="settingsPanel">
+      <div class="settings-head">
+        <span class="settings-title">设置</span>
+        <button class="icon-btn small" id="settingsClose" title="关闭">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+
+      <div class="set-row">
+        <div class="set-label">窗口透明度</div>
+        <div class="slider-row">
+          <input type="range" id="opacityRange" min="0" max="100" step="1">
+          <span class="value" id="opacityValue">10%</span>
+        </div>
+      </div>
+
+      <div class="set-block">
+        <div class="set-label">背景色</div>
+        <div class="set-desc">玻璃面板的底色</div>
+        <div class="color-row" id="colorRow">
+          <button class="swatch" data-color="#342a72" style="--sw:#342a72" title="靛紫"></button>
+          <button class="swatch" data-color="#1b2f6b" style="--sw:#1b2f6b" title="深海蓝"></button>
+          <button class="swatch" data-color="#1d3b3b" style="--sw:#1d3b3b" title="松石绿"></button>
+          <button class="swatch" data-color="#3a1c3f" style="--sw:#3a1c3f" title="绛紫"></button>
+          <button class="swatch" data-color="#262430" style="--sw:#262430" title="石墨灰"></button>
+          <label class="color-custom" title="自定义颜色">
+            <input type="color" id="bgColor" value="#342a72">
+          </label>
+        </div>
+      </div>
+
+      <div class="set-block">
+        <div class="set-label">背景图片</div>
+        <div class="bg-row">
+          <div class="bg-preview" id="bgPreview"></div>
+          <div class="bg-actions">
+            <button class="btn small" id="pickBg">选择图片</button>
+            <button class="btn small ghost" id="clearBg">清除</button>
+          </div>
+        </div>
+        <div class="segmented" id="bgModes">
+          <button data-mode="stretch">拉伸</button>
+          <button data-mode="tile">平铺</button>
+          <button data-mode="fill">填充</button>
+        </div>
+      </div>
+
+      <div class="set-row">
+        <div>
+          <div class="set-label">日历模式</div>
+          <div class="set-desc">日历页显示事项时长与天气，与极简模式互斥</div>
+        </div>
+        <div class="switch" id="calendarSwitch" role="switch" aria-checked="false"><span></span></div>
+      </div>
+
+      <div class="set-row">
+        <div>
+          <div class="set-label">极简模式</div>
+          <div class="set-desc">待办单行显示，超出用 … 省略，与日历模式互斥</div>
+        </div>
+        <div class="switch" id="minimalSwitch" role="switch" aria-checked="false"><span></span></div>
+      </div>
+
+      <div class="set-row">
+        <div>
+          <div class="set-label">窗口置顶</div>
+          <div class="set-desc">始终显示在其他窗口上方</div>
+        </div>
+        <div class="switch" id="topSwitch" role="switch" aria-checked="true"><span></span></div>
+      </div>
+
+      <div class="set-block">
+        <div class="set-label">天气城市</div>
+        <div class="city-row">
+          <input class="text-input" id="cityInput" placeholder="输入城市名称" spellcheck="false">
+          <button class="btn small" id="locateBtn">定位</button>
+        </div>
+      </div>
+
+      <div class="settings-foot">
+        <button class="btn ghost danger-text" id="quitBtn">退出程序</button>
+        <button class="btn primary" id="settingsDone">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="popover" id="duePopover" hidden>
+    <div class="pop-title">设置结束时间</div>
+    <div class="quick-row">
+      <button class="chip" data-quick="today18">今天 18:00</button>
+      <button class="chip" data-quick="tomorrow9">明天 09:00</button>
+    </div>
+    <div class="dt-row">
+      <input type="date" id="dueDate">
+      <input type="time" id="dueTime">
+    </div>
+    <div class="pop-actions">
+      <button class="btn small ghost" id="dueClear">清除</button>
+      <button class="btn small primary" id="dueOk">确定</button>
+    </div>
+  </div>
+
+  <div class="popover cal-add-popover" id="calAddPopover" hidden>
+    <div class="pop-title" id="calAddTitle">添加待办</div>
+    <div class="cal-add-row">
+      <input class="text-input cal-add-input" id="calAddInput" type="text" placeholder="输入待办内容，回车添加" spellcheck="false">
+      <button class="cal-add-clock" id="calAddClock" title="设置截止时间" aria-label="设置截止时间">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3 1.8"/>
+        </svg>
+      </button>
+    </div>
+    <div class="cal-add-time" id="calAddTime" hidden>
+      <input type="date" id="calAddDate">
+      <input type="time" id="calAddTimeValue">
+    </div>
+    <div class="cal-add-hint" id="calAddHint"></div>
+    <div class="pop-actions">
+      <button class="btn small ghost" id="calAddCancel">取消</button>
+      <button class="btn small primary" id="calAddOk">添加</button>
+    </div>
+  </div>
+
+  <div class="cal-info" id="calInfo" hidden>
+    <span class="ci-term" id="ciTerm" hidden></span>
+    <div class="ci-lunar" id="ciLunar"></div>
+    <div class="ci-weather" id="ciWeather" hidden>
+      <span class="ci-wicon" id="ciWIcon"></span>
+      <span id="ciWText"></span>
+    </div>
+    <div class="ci-quote" id="ciQuote">
+      <div class="ci-quote-text" id="ciQuoteText"></div>
+      <div class="ci-quote-from" id="ciQuoteFrom"></div>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
