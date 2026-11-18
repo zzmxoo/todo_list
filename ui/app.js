@@ -64,9 +64,7 @@
     SOLAR_TERMS,
     pad2,
     ymd,
-    startOfDay,
     solarTermOn,
-    clipSegment,
     layoutBands,
     badgePlacements,
     buildExportText,
@@ -230,6 +228,7 @@
   // 待办领域规则集中在 ui/domain/todo.js
   const { parseDue, dueState, dueText, todoDuration, sortTodos, createTodo, applyDone } =
     window.TodoDomain;
+  const { buildEvents, buildMonthWeeks } = window.CalendarDomain;
 
   function wmoInfo(code) {
     return WMO[Number(code)] || ["未知", "cloud"];
@@ -1624,26 +1623,8 @@
     els.calTitle.textContent = `${y}年${m + 1}月`;
     if (y >= 2007 && y <= now.getFullYear() + 1) ensureHolidays(y);
 
-    // 事项从创建时间持续到结束时间：横条跨几个日期格，就代表持续了几天。
-    const events = [];
-    for (const todo of state.todos) {
-      const due = parseDue(todo);
-      if (!due) continue;
-      const created = todo.start
-        ? new Date(todo.start)
-        : todo.created
-          ? new Date(todo.created)
-          : null;
-      const start = created && !Number.isNaN(created.getTime()) && created <= due ? created : due;
-      events.push({
-        todo,
-        start,
-        end: due,
-        startDay: startOfDay(start),
-        endDay: startOfDay(due),
-        color: events.length % 5,
-      });
-    }
+    // 事项从创建时间持续到结束时间，日历模型由 domain/calendar.js 计算
+    const events = buildEvents(state.todos);
 
     const weatherByDay = new Map();
     for (const day of state.weather?.daily || []) {
@@ -1651,37 +1632,14 @@
     }
 
     const holidayByDay = holidayMap();
-    const monthStart = new Date(y, m, 1);
-    const monthEnd = new Date(y, m + 1, 0);
-
-    let monthCount = 0;
-    const monthPrefix = `${y}-${pad2(m + 1)}`;
-    for (const ev of events) {
-      if (ymd(ev.end).startsWith(monthPrefix)) monthCount += 1;
-    }
-    els.calSub.textContent = monthCount ? `${monthCount} 项事项` : "";
-
-    const first = new Date(y, m, 1);
-    const offset = (first.getDay() + 6) % 7;
-    const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const weekCount = Math.ceil((offset + daysInMonth) / 7);
-    const gridStart = new Date(y, m, 1 - offset);
+    const model = buildMonthWeeks(y, m, events);
+    els.calSub.textContent = model.monthCount ? `${model.monthCount} 项事项` : "";
     const todayKey = ymd(new Date());
-    const DAY_MS = 86400000;
 
     els.calGrid.innerHTML = "";
 
-    for (let w = 0; w < weekCount; w += 1) {
-      const weekStart = new Date(
-        gridStart.getFullYear(),
-        gridStart.getMonth(),
-        gridStart.getDate() + w * 7
-      );
-      const weekEnd = new Date(
-        weekStart.getFullYear(),
-        weekStart.getMonth(),
-        weekStart.getDate() + 6
-      );
+    for (const weekModel of model.weeks) {
+      const { weekStart, segments } = weekModel;
       const week = document.createElement("div");
       week.className = "cal-week";
       week.setAttribute("data-tauri-drag-region", "");
@@ -1732,22 +1690,6 @@
         week.appendChild(cell);
       }
 
-      // 计算这一周内与事项区间相交的片段（只绘制本月内的部分）
-      const segments = [];
-      for (const ev of events) {
-        const clip = clipSegment(ev.startDay, ev.endDay, weekStart, weekEnd, monthStart, monthEnd);
-        if (!clip) continue;
-        const col = clamp(Math.round((clip.from - weekStart) / DAY_MS), 0, 6);
-        const span = clamp(Math.round((clip.to - clip.from) / DAY_MS) + 1, 1, 7 - col);
-        segments.push({
-          ev,
-          col,
-          span,
-          cutLeft: ev.startDay < clip.from,
-          cutRight: ev.endDay > clip.to,
-        });
-      }
-      segments.sort((a, b) => a.col - b.col || b.span - a.span);
       paintWeekBands(week, segments, weekStart);
       els.calGrid.appendChild(week);
     }
