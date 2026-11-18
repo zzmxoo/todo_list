@@ -9,8 +9,6 @@
     bg_color: "#342a72",
     minimal: false,
     calendar: false,
-    upcoming: false,
-    upcoming_days: 7,
     always_on_top: true,
     city: "北京",
     latitude: null,
@@ -66,10 +64,10 @@
     ymd,
     startOfDay,
     solarTermOn,
-    withinUpcoming,
     clipSegment,
     layoutBands,
     badgePlacements,
+    buildExportText,
   } = window.TodoCore;
 
   // 节气弹框背景：深色渐变 + 节气名水印，按季节配一组颜色
@@ -455,9 +453,7 @@
     els.clearBg = document.getElementById("clearBg");
     els.bgModes = document.getElementById("bgModes");
     els.calendarSwitch = document.getElementById("calendarSwitch");
-    els.upcomingRow = document.getElementById("upcomingRow");
-    els.upcomingDays = document.getElementById("upcomingDays");
-    els.upcomingSwitch = document.getElementById("upcomingSwitch");
+    els.exportBtn = document.getElementById("exportBtn");
     els.minimalSwitch = document.getElementById("minimalSwitch");
     els.topSwitch = document.getElementById("topSwitch");
     els.cityInput = document.getElementById("cityInput");
@@ -555,8 +551,6 @@
     state.settings.bg_color = normalizeHex(state.settings.bg_color, DEFAULT_SETTINGS.bg_color);
     state.settings.minimal = !!state.settings.minimal;
     state.settings.calendar = !!state.settings.calendar;
-    state.settings.upcoming = !!state.settings.upcoming;
-    state.settings.upcoming_days = normalizeUpcomingDays(state.settings.upcoming_days);
     if (!state.settings.holidays || typeof state.settings.holidays !== "object") {
       state.settings.holidays = {};
     }
@@ -568,6 +562,7 @@
         id: todo.id || crypto.randomUUID(),
         text: todo.text,
         done: !!todo.done,
+        done_at: todo.done_at || null,
         pinned: !!todo.pinned,
         due: todo.due || null,
         start: todo.start || null,
@@ -790,12 +785,6 @@
     els.opacityValue.textContent = `${transparency}%`;
     els.calendarSwitch.classList.toggle("on", !!s.calendar);
     els.calendarSwitch.setAttribute("aria-checked", String(!!s.calendar));
-    els.upcomingRow.hidden = !s.calendar;
-    setSwitch(els.upcomingSwitch, !!s.upcoming);
-    if (document.activeElement !== els.upcomingDays) {
-      els.upcomingDays.value = String(normalizeUpcomingDays(s.upcoming_days));
-    }
-    els.upcomingDays.disabled = !s.upcoming;
     els.topSwitch.classList.toggle("on", !!s.always_on_top);
     els.topSwitch.setAttribute("aria-checked", String(!!s.always_on_top));
     setSwitch(els.minimalSwitch, !!s.minimal);
@@ -816,29 +805,6 @@
     return '<span class="mark-dot"></span>';
   }
 
-  function normalizeUpcomingDays(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n <= 0) return 7;
-    return clamp(Math.round(n), 1, 30);
-  }
-
-  function upcomingDays() {
-    return normalizeUpcomingDays(state.settings.upcoming_days);
-  }
-
-  function upcomingActive() {
-    return !!state.settings.calendar && !!state.settings.upcoming;
-  }
-
-  // 近 N 天内到期（含已超时）的待办；已完成且已过期的不再占用名额外
-  function isUpcomingTodo(todo) {
-    const due = parseDue(todo);
-    if (!due) return false;
-    const now = new Date();
-    if (todo.done && due < startOfDay(now)) return false;
-    return withinUpcoming(due, now, upcomingDays());
-  }
-
   function renderTodos() {
     if (addEditing) {
       addEditing = false;
@@ -846,19 +812,13 @@
       els.addRow.innerHTML = DEFAULT_BODY();
     }
 
-    const all = sortTodos(state.todos);
-    // 近期待办模式下保留没有截止时间的事项，避免刚添加就消失
-    const list = upcomingActive()
-      ? all.filter((todo) => !parseDue(todo) || isUpcomingTodo(todo))
-      : all;
+    const list = sortTodos(state.todos);
     els.todoList.innerHTML = "";
 
     if (!list.length) {
       const hint = document.createElement("div");
       hint.className = "empty-hint";
-      hint.innerHTML = upcomingActive()
-        ? `近 ${upcomingDays()} 天暂无待办<div class="sub">可在设置中关闭「近期待办」查看全部</div>`
-        : "暂无待办<div class=\"sub\">点击空白处或下方「添加待办」开始记录</div>";
+      hint.innerHTML = "暂无待办<div class=\"sub\">点击空白处或下方「添加待办」开始记录</div>";
       els.todoList.appendChild(hint);
     }
 
@@ -877,9 +837,7 @@
     row.className =
       "todo-row" +
       (todo.done ? " done" : "") +
-      (status === "overdue" ? " overdue" : "") +
-      (status === "soon" ? " soon" : "") +
-      (upcomingActive() && isUpcomingTodo(todo) ? " upcoming" : "");
+      (status === "overdue" ? " overdue" : "");
     row.dataset.id = todo.id;
 
     const mark = document.createElement("span");
@@ -914,7 +872,6 @@
       const status = dueState(todo);
       row.classList.toggle("done", !!todo.done);
       row.classList.toggle("overdue", status === "overdue");
-      row.classList.toggle("soon", status === "soon");
       const mark = row.querySelector(".status");
       if (mark) {
         mark.className = `status ${status}`;
@@ -942,6 +899,7 @@
       id: crypto.randomUUID(),
       text: value,
       done: false,
+      done_at: null,
       pinned: false,
       due: options.due || null,
       start: options.start || null,
@@ -967,6 +925,7 @@
     const todo = findTodo(id);
     if (!todo) return;
     todo.done = !todo.done;
+    todo.done_at = todo.done ? new Date().toISOString() : null;
     save();
     renderTodos();
     scheduleLayout();
@@ -1854,9 +1813,6 @@
 
   // 绘制一周的事项色条；滚轮滚动时只重绘这一周
   function paintWeekBands(week, segments, weekStart) {
-    const nearIds = upcomingActive()
-      ? new Set(state.todos.filter(isUpcomingTodo).map((todo) => todo.id))
-      : null;
     const overlay = document.createElement("div");
     overlay.className = "cal-bars";
     overlay.setAttribute("data-tauri-drag-region", "");
@@ -1877,8 +1833,7 @@
         `cal-bar c${seg.ev.color}` +
         (seg.cutLeft ? " cut-left" : "") +
         (seg.cutRight ? " cut-right" : "") +
-        (seg.ev.todo.done ? " done" : "") +
-        (nearIds && nearIds.has(seg.ev.todo.id) ? " upcoming" : "");
+        (seg.ev.todo.done ? " done" : "");
       bar.style.setProperty("--col", String(seg.col));
       bar.style.setProperty("--span", String(seg.span));
       bar.style.top = `${18 + (seg.lane - laneOffset) * 11}px`;
@@ -1964,7 +1919,6 @@
     setSwitch(els.minimalSwitch, state.settings.minimal);
     document.body.classList.toggle("calendar-mode", state.settings.calendar);
     document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
-    els.upcomingRow.hidden = !state.settings.calendar;
     save();
     renderTodos();
     if (!settingsOpen) {
@@ -1981,6 +1935,33 @@
       console.warn(err);
     }
     save();
+  }
+
+  // 导出最近 30 天已完成事项：创建时间，完成时间，事项内容
+  async function exportRecentDone() {
+    const content = buildExportText(state.todos, Date.now(), 30);
+    const btn = els.exportBtn;
+    const reset = () => setTimeout(() => (btn.textContent = "导出"), 1500);
+
+    if (!content) {
+      btn.textContent = "暂无记录";
+      reset();
+      return;
+    }
+
+    const name = `近期待办-${ymd(new Date())}.txt`;
+
+    try {
+      const saved = await invoke("export_text", { defaultName: name, content });
+      if (saved) {
+        btn.textContent = "已导出";
+        reset();
+      }
+    } catch (err) {
+      console.warn("export failed", err);
+      btn.textContent = "导出失败";
+      reset();
+    }
   }
 
   async function changeCity() {
@@ -2333,26 +2314,9 @@
       setSwitch(els.calendarSwitch, state.settings.calendar);
       document.body.classList.toggle("calendar-mode", state.settings.calendar);
       document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
-      els.upcomingRow.hidden = !state.settings.calendar;
       save();
       renderTodos();
       if (!settingsOpen) scheduleLayout();
-    });
-
-    els.upcomingSwitch.addEventListener("click", () => {
-      state.settings.upcoming = !state.settings.upcoming;
-      setSwitch(els.upcomingSwitch, state.settings.upcoming);
-      els.upcomingDays.disabled = !state.settings.upcoming;
-      save();
-      renderTodos();
-    });
-
-    els.upcomingDays.addEventListener("change", () => {
-      const days = normalizeUpcomingDays(els.upcomingDays.value);
-      els.upcomingDays.value = String(days);
-      state.settings.upcoming_days = days;
-      save();
-      renderTodos();
     });
 
     els.bgModes.addEventListener("click", (event) => {
@@ -2365,6 +2329,7 @@
 
     els.calendarSwitch.addEventListener("click", () => toggleCalendarMode());
     els.topSwitch.addEventListener("click", () => toggleAlwaysOnTop());
+    els.exportBtn.addEventListener("click", () => exportRecentDone());
 
     els.cityInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {

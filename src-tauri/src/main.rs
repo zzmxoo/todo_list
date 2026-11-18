@@ -60,9 +60,35 @@ fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
     Ok(Some(dst.to_string_lossy().to_string()))
 }
 
+/// 弹出保存对话框，把文本写入用户选择的文件；取消时返回 None。
+#[tauri::command]
+fn export_text(default_name: String, content: String) -> Result<Option<String>, String> {
+    let picked = rfd::FileDialog::new()
+        .set_title("导出近期待办")
+        .set_file_name(&default_name)
+        .add_filter("文本文件", &["txt"])
+        .save_file();
+
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+    let path = if path.extension().is_none() {
+        path.with_extension("txt")
+    } else {
+        path
+    };
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_state, save_state, pick_image])
+        .invoke_handler(tauri::generate_handler![
+            load_state,
+            save_state,
+            pick_image,
+            export_text
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run desktop todo widget");
 }

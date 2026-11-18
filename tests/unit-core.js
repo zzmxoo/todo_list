@@ -44,15 +44,6 @@
     eq(core.solarTermOn(new Date(2026, 10, 21)), '');
   });
 
-  test('withinUpcoming 今天起 N 天（含已超时）', () => {
-    const now = new Date(2026, 10, 17, 10, 0);
-    eq(core.withinUpcoming(new Date(2026, 10, 16, 9, 0), now, 7), true, '超时');
-    eq(core.withinUpcoming(new Date(2026, 10, 17, 18, 0), now, 7), true, '今天');
-    eq(core.withinUpcoming(new Date(2026, 10, 23, 23, 59), now, 7), true, '第7天');
-    eq(core.withinUpcoming(new Date(2026, 10, 24, 0, 0), now, 7), false, '第8天');
-    eq(core.withinUpcoming(null, now, 7), false, '空值');
-  });
-
   test('clipSegment 跨月只保留本月', () => {
     const clip = core.clipSegment(
       new Date(2026, 0, 28),
@@ -176,6 +167,22 @@
     eq(out[0].count, 2);
     eq(out[1].kind, 'below');
     eq(out[1].count, 1);
+  });
+
+  test('buildExportText 近 30 天已完成，按完成时间排序', () => {
+    const now = new Date(2026, 10, 18, 12, 0).getTime();
+    const todos = [
+      { text: 'B', done: true, created: '2026-11-01T09:00:00', done_at: '2026-11-17T10:30:00' },
+      { text: 'A', done: true, created: '2026-10-01T09:00:00', done_at: '2026-11-10T08:05:00' },
+      { text: 'old', done: true, created: '2026-09-01T09:00:00', done_at: '2026-10-01T09:00:00' },
+      { text: 'open', done: false, created: '2026-11-01T09:00:00', done_at: null },
+    ];
+    const text = core.buildExportText(todos, now, 30);
+    const lines = text.trim().split('\r\n');
+    eq(lines.length, 2);
+    eq(lines[0], '2026-10-01 09:00，2026-11-10 08:05，A');
+    eq(lines[1], '2026-11-01 09:00，2026-11-17 10:30，B');
+    eq(core.buildExportText([], now, 30), '');
   });
 
   test('透明度按 gamma 2.2 映射并可逆', () => {

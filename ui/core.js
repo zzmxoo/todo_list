@@ -47,11 +47,27 @@
     return "";
   }
 
-  // 是否落在「今天起 days 天内」的窗口（含已超时，不含无截止时间的待办）
-  function withinUpcoming(due, now, days) {
-    if (!(due instanceof Date) || Number.isNaN(due.getTime())) return false;
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
-    return due < end;
+  // 导出用时间格式：YYYY-MM-DD HH:mm
+  function formatStamp(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+
+  // 近 days 天已完成事项：每行「创建时间，完成时间，内容」，按完成时间升序
+  function buildExportText(todos, nowMs, days) {
+    const cutoff = nowMs - days * 86400000;
+    const items = (todos || [])
+      .filter((todo) => todo && todo.done && todo.done_at)
+      .map((todo) => ({ todo, at: new Date(todo.done_at).getTime() }))
+      .filter((item) => Number.isFinite(item.at) && item.at >= cutoff)
+      .sort((a, b) => a.at - b.at);
+    if (!items.length) return "";
+    const lines = items.map(({ todo }) =>
+      [formatStamp(todo.created), formatStamp(todo.done_at), todo.text].join("，")
+    );
+    return lines.join("\r\n") + "\r\n";
   }
 
   // 把跨月 / 跨周的事项区间裁到 [weekStart, weekEnd] 与 [monthStart, monthEnd] 的交集
@@ -116,10 +132,11 @@
     ymd,
     startOfDay,
     solarTermOn,
-    withinUpcoming,
     clipSegment,
     layoutBands,
     badgePlacements,
+    formatStamp,
+    buildExportText,
     opacityFromTransparency,
     transparencyFromOpacity,
   };

@@ -252,12 +252,6 @@ body.calendar-mode .todo-header #settingsBtn { margin-left: auto; }
   box-shadow: none;
 }
 
-/* 近期待办：色卡标绿（即将到期 / 已超时 / 已完成仍保留原色提醒） */
-.todo-row.upcoming:not(.overdue):not(.done):not(.soon) .status {
-  background: linear-gradient(180deg, rgba(134, 239, 172, 0.98), rgba(52, 211, 153, 0.82));
-  box-shadow: none;
-}
-
 .mark-dot {
   width: 8px;
   height: 8px;
@@ -789,11 +783,6 @@ body.minimal-mode .add-row .add-input { font-size: 12px; }
 .cal-bar.c3 { background: rgba(248, 113, 113, 0.86); }
 .cal-bar.c4 { background: rgba(167, 139, 250, 0.88); }
 
-.cal-bar.upcoming {
-  background: rgba(52, 211, 153, 0.9);
-  color: #06301f;
-}
-
 .cal-bar.done { opacity: 0.5; }
 
 .cal-bar-badge {
@@ -975,36 +964,6 @@ body.calendar-mode .cal-weather {
 .set-block {
   padding: 9px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.upcoming-ctrl {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.days-input {
-  width: 46px;
-  padding: 3px 6px;
-  border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(8, 12, 22, 0.45);
-  color: #e7eefb;
-  font-size: 12px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-.days-input:focus {
-  outline: none;
-  border-color: rgba(91, 140, 255, 0.6);
-}
-
-.days-input::-webkit-inner-spin-button,
-.days-input::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
 }
 
 .set-label { font-size: 12.5px; color: #dfe8fa; }
