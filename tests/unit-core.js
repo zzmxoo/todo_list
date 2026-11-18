@@ -147,25 +147,35 @@
 
   test('badgePlacements 统一贴在行尾并统计上下条数', () => {
     const segs = [0, 1, 2, 3, 4].map(() => ({ col: 1, span: 2 }));
-    const top = core.badgePlacements(core.layoutBands(segs, 3, 0).placed, 3, 0);
+    const bands = core.layoutBands(segs, 3, 0);
+    const top = core.badgePlacements(bands.above, bands.below);
     eq(top.length, 1);
     eq(top[0].kind, 'below');
     eq(top[0].col, 6);
     eq(top[0].count, 2);
 
-    const scrolled = core.badgePlacements(core.layoutBands(segs, 3, 2).placed, 3, 2);
+    const scrolledBands = core.layoutBands(segs, 3, 2);
+    const scrolled = core.badgePlacements(scrolledBands.above, scrolledBands.below);
     eq(scrolled.length, 1);
     eq(scrolled[0].kind, 'above');
     eq(scrolled[0].count, 2);
 
-    const both = core.badgePlacements(
-      core.layoutBands([0, 1, 2, 3, 4, 5].map(() => ({ col: 1, span: 2 })), 2, 2).placed,
-      2,
-      2
-    );
+    const bothBands = core.layoutBands([0, 1, 2, 3, 4, 5].map(() => ({ col: 1, span: 2 })), 2, 2);
+    const both = core.badgePlacements(bothBands.above, bothBands.below);
     eq(both.length, 2);
     eq(both[0].col, 6);
     eq(both[1].col, 6);
+  });
+
+  test('badgePlacements 取各天隐藏条数的最大值', () => {
+    const above = [0, 2, 2, 2, 1, 0, 0];
+    const below = [0, 0, 1, 1, 0, 0, 0];
+    const out = core.badgePlacements(above, below);
+    eq(out.length, 2);
+    eq(out[0].kind, 'above');
+    eq(out[0].count, 2);
+    eq(out[1].kind, 'below');
+    eq(out[1].count, 1);
   });
 
   const passed = results.filter((r) => r.ok).length;

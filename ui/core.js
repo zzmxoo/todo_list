@@ -89,17 +89,13 @@
     return { placed, laneCount: laneEnds.length, offset: start, maxOffset, above, below };
   }
 
-  // +n 徽标：统一贴在行尾（周日）格，分别表示上方 / 下方还有几条
-  function badgePlacements(placed, maxBars, offset) {
-    let above = 0;
-    let below = 0;
-    for (const seg of placed) {
-      if (seg.lane < offset) above += 1;
-      else if (seg.lane >= offset + maxBars) below += 1;
-    }
+  // +n 徽标：统一贴在行尾（周日）格；数字取该周各天里上方 / 下方隐藏条数的最大值
+  function badgePlacements(above, below) {
+    const aboveMax = above.length ? Math.max(0, ...above) : 0;
+    const belowMax = below.length ? Math.max(0, ...below) : 0;
     const out = [];
-    if (above) out.push({ col: 6, count: above, kind: "above" });
-    if (below) out.push({ col: 6, count: below, kind: "below" });
+    if (aboveMax) out.push({ col: 6, count: aboveMax, kind: "above" });
+    if (belowMax) out.push({ col: 6, count: belowMax, kind: "below" });
     return out;
   }
 

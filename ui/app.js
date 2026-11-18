@@ -1910,7 +1910,7 @@
     };
     const top = 18;
     const bottom = 18 + (MAX_BARS - 1) * 11;
-    for (const badge of badgePlacements(bands.placed, MAX_BARS, laneOffset)) {
+    for (const badge of badgePlacements(bands.above, bands.below)) {
       addBadge(badge.col, badge.kind === "above" ? top : bottom, `+${badge.count}`, badge.kind);
     }
 
