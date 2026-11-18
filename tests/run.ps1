@@ -10,7 +10,7 @@ function Eval-Expr([string]$expr) {
 }
 
 $failed = 0
-foreach ($file in @('unit-core.js', 'unit-weather.js', 'unit-todo.js', 'unit-calendar.js')) {
+foreach ($file in @('unit-core.js', 'unit-weather.js', 'unit-todo.js', 'unit-calendar.js', 'unit-domain.js')) {
   $expr = Get-Content (Join-Path $PSScriptRoot $file) -Raw -Encoding UTF8
   $result = Eval-Expr $expr | ConvertFrom-Json
   foreach ($case in $result.results) {

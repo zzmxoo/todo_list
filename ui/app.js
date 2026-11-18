@@ -229,6 +229,8 @@
   const { parseDue, dueState, dueText, todoDuration, sortTodos, createTodo, applyDone } =
     window.TodoDomain;
   const { buildEvents, buildMonthWeeks } = window.CalendarDomain;
+  const { buildHolidayMap } = window.HolidayDomain;
+  const { pickQuote } = window.QuoteDomain;
 
   function wmoInfo(code) {
     return WMO[Number(code)] || ["未知", "cloud"];
@@ -1440,15 +1442,10 @@
   }
 
   function randomQuote() {
-    const pool = quotePool();
-    if (!pool.length) return null;
-    let index = Math.floor(Math.random() * pool.length);
-    // 避免连续两次看到同一句
-    while (pool.length > 1 && index === lastQuoteIndex) {
-      index = Math.floor(Math.random() * pool.length);
-    }
-    lastQuoteIndex = index;
-    const item = pool[index];
+    const picked = pickQuote(quotePool(), lastQuoteIndex);
+    if (!picked) return null;
+    lastQuoteIndex = picked.index;
+    const item = picked.item;
     return { text: item.t ?? item.text, from: item.f ?? item.from };
   }
 
@@ -1491,7 +1488,7 @@
 
     const key = ymd(date);
     const lunar = lunarText(date);
-    const holidayName = holidayMap().get(key);
+    const holidayName = buildHolidayMap(state.settings.holidays).get(key);
     els.ciLunar.textContent = [holidayName, lunar ? `农历 ${lunar}` : ""]
       .filter(Boolean)
       .join(" · ");
@@ -1547,19 +1544,6 @@
     const all = state.settings.holidays;
     const cfg = all && typeof all === "object" ? all[year] : null;
     return cfg && Array.isArray(cfg.days) ? cfg : null;
-  }
-
-  function holidayMap() {
-    const map = new Map();
-    const all = state.settings.holidays;
-    if (!all || typeof all !== "object") return map;
-    for (const cfg of Object.values(all)) {
-      if (!cfg || !Array.isArray(cfg.days)) continue;
-      for (const day of cfg.days) {
-        if (day && day.off && day.date) map.set(day.date, day.name || "节假日");
-      }
-    }
-    return map;
   }
 
   function ensureHolidays(year, force) {
@@ -1631,7 +1615,7 @@
       weatherByDay.set(day.date, day);
     }
 
-    const holidayByDay = holidayMap();
+    const holidayByDay = buildHolidayMap(state.settings.holidays);
     const model = buildMonthWeeks(y, m, events);
     els.calSub.textContent = model.monthCount ? `${model.monthCount} 项事项` : "";
     const todayKey = ymd(new Date());
