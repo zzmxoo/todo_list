@@ -718,26 +718,20 @@
     els.app.style.setProperty("--op", String(s.opacity));
     applyGlassColor(normalizeHex(s.bg_color, DEFAULT_SETTINGS.bg_color));
 
-    if (s.bg_image) {
-      const url = toFileUrl(s.bg_image);
-      els.bgImage.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`;
-      els.bgPreview.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`;
-    } else {
-      els.bgImage.style.backgroundImage = "none";
-      els.bgPreview.style.backgroundImage = "none";
-    }
+    // 背景图填充到卡片内部，外层画布保持透明
+    const hasBg = !!s.bg_image;
+    const url = hasBg ? String(toFileUrl(s.bg_image)).replace(/"/g, "%22") : "";
+    els.app.classList.toggle("has-bg", hasBg);
+    els.app.style.setProperty("--card-image", hasBg ? `url("${url}")` : "none");
+    els.bgPreview.style.backgroundImage = hasBg ? `url("${url}")` : "none";
+    els.bgImage.style.backgroundImage = "none";
 
     const mode = s.bg_mode || "fill";
-    if (mode === "stretch") {
-      els.bgImage.style.backgroundSize = "100% 100%";
-      els.bgImage.style.backgroundRepeat = "no-repeat";
-    } else if (mode === "tile") {
-      els.bgImage.style.backgroundSize = "auto";
-      els.bgImage.style.backgroundRepeat = "repeat";
-    } else {
-      els.bgImage.style.backgroundSize = "cover";
-      els.bgImage.style.backgroundRepeat = "no-repeat";
-    }
+    els.app.style.setProperty(
+      "--card-size",
+      mode === "stretch" ? "100% 100%" : mode === "tile" ? "auto" : "cover"
+    );
+    els.app.style.setProperty("--card-repeat", mode === "tile" ? "repeat" : "no-repeat");
 
     els.bgModes.querySelectorAll("button").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.mode === mode);
