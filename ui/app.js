@@ -815,7 +815,18 @@
     if (edge === "top") hidden.y = r.y - size.height + sliver;
     if (edge === "bottom") hidden.y = r.y + r.h - sliver;
 
-    edgeHide = { edge, rect: r, size, hidden, shown, revealed: false, armed: false };
+    edgeHide = {
+      edge,
+      rect: r,
+      size,
+      hidden,
+      shown,
+      revealed: false,
+      armed: false,
+      // 拖动过程中就收起：松开鼠标时系统会把窗口拉回拖动位置，需要重新收起
+      pending: pointerDown,
+      reassertUntil: 0,
+    };
     topDwellSince = 0;
     clearTimeout(topDwellTimer);
     clearTimeout(edgeRevealTimer);
@@ -888,15 +899,31 @@
   async function handleMoveSettled() {
     if (!win) return;
     if (edgeHide) {
-      // 隐藏 / 唤出状态下的位置变化：程序化移动忽略，用户拖动则退出隐藏模式
       let pos;
+      let size;
       try {
         pos = await win.outerPosition();
+        size = await win.outerSize();
       } catch (err) {
         return;
       }
-      const ref = edgeHide.revealed ? edgeHide.shown : edgeHide.hidden;
-      const moved = Math.abs(pos.x - ref.x) + Math.abs(pos.y - ref.y);
+      const r = edgeHide.rect;
+      if (!edgeHide.revealed) {
+        // 收起状态下只要仍贴着该边缘（含系统在松开鼠标时把窗口放回原位），就重新收起
+        let dist = 0;
+        if (edgeHide.edge === "left") dist = pos.x - r.x;
+        else if (edgeHide.edge === "right") dist = r.x + r.w - (pos.x + size.width);
+        else if (edgeHide.edge === "top") dist = pos.y - r.y;
+        else dist = r.y + r.h - (pos.y + size.height);
+        if (dist <= 60) {
+          await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
+          return;
+        }
+        clearEdgeHide();
+        return handleMoveSettled();
+      }
+      // 唤出状态下：程序化移动忽略，用户拖动则退出隐藏模式
+      const moved = Math.abs(pos.x - edgeHide.shown.x) + Math.abs(pos.y - edgeHide.shown.y);
       if (moved <= 4) return;
       clearEdgeHide();
       return handleMoveSettled();
@@ -2723,6 +2750,16 @@
       clearTimeout(topDwellTimer);
       clearTimeout(moveSettleTimer);
       moveSettleTimer = setTimeout(handleMoveSettled, 80);
+      if (edgeHide && !edgeHide.revealed && edgeHide.pending) {
+        // 拖动中已收起：松开鼠标后系统会把窗口放回鼠标位置，延迟重新收起
+        edgeHide.pending = false;
+        edgeHide.reassertUntil = Date.now() + 700;
+        setTimeout(() => {
+          if (edgeHide && !edgeHide.revealed) {
+            animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
+          }
+        }, 80);
+      }
     });
     document.addEventListener(
       "pointerup",
