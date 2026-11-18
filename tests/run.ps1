@@ -9,12 +9,16 @@ function Eval-Expr([string]$expr) {
   throw (($obj.result.result.description) + ' ' + $obj.result.result.className)
 }
 
-$expr = Get-Content (Join-Path $PSScriptRoot 'unit-core.js') -Raw -Encoding UTF8
-$result = Eval-Expr $expr | ConvertFrom-Json
-foreach ($case in $result.results) {
-  if ($case.ok) { "PASS  $($case.name)" } else { "FAIL  $($case.name): $($case.error)" }
+$failed = 0
+foreach ($file in @('unit-core.js', 'unit-weather.js')) {
+  $expr = Get-Content (Join-Path $PSScriptRoot $file) -Raw -Encoding UTF8
+  $result = Eval-Expr $expr | ConvertFrom-Json
+  foreach ($case in $result.results) {
+    if ($case.ok) { "PASS  $($case.name)" } else { "FAIL  $($case.name): $($case.error)" }
+  }
+  "UNIT[$file] pass=$($result.passed) fail=$($result.failed)"
+  $failed += [int]$result.failed
 }
-"UNIT  pass=$($result.passed) fail=$($result.failed)"
 
 $quotesExpr = @'
 fetch('quotes.json')
@@ -33,6 +37,6 @@ fetch('quotes.json')
 '@
 $quotes = Eval-Expr $quotesExpr | ConvertFrom-Json
 "QUOTES total=$($quotes.total) unique=$($quotes.unique) dup=$($quotes.dup) badLen=$($quotes.badLen) badAuthor=$($quotes.badAuthor)"
-if ($result.failed -gt 0 -or $quotes.total -ne 1460 -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
+if ($failed -gt 0 -or $quotes.total -ne 1460 -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
   exit 1
 }

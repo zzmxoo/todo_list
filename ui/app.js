@@ -11,6 +11,8 @@
     calendar: false,
     always_on_top: true,
     city: "北京",
+    weather_api: "",
+    autostart: false,
     latitude: null,
     longitude: null,
     weather_open: false,
@@ -454,9 +456,11 @@
     els.bgModes = document.getElementById("bgModes");
     els.calendarSwitch = document.getElementById("calendarSwitch");
     els.exportBtn = document.getElementById("exportBtn");
+    els.autostartSwitch = document.getElementById("autostartSwitch");
     els.minimalSwitch = document.getElementById("minimalSwitch");
     els.topSwitch = document.getElementById("topSwitch");
     els.cityInput = document.getElementById("cityInput");
+    els.weatherApiInput = document.getElementById("weatherApiInput");
     els.locateBtn = document.getElementById("locateBtn");
     els.quitBtn = document.getElementById("quitBtn");
     els.duePopover = document.getElementById("duePopover");
@@ -534,6 +538,12 @@
 
     setTimeout(() => refreshWeather(), 350);
     holidayCheckToday();
+    invoke("get_autostart")
+      .then((on) => {
+        state.settings.autostart = !!on;
+        setSwitch(els.autostartSwitch, !!on);
+      })
+      .catch(() => {});
     if (
       state.settings.city === "当前位置" &&
       Number.isFinite(Number(state.settings.latitude)) &&
@@ -549,6 +559,9 @@
     const rawOpacity = Number(state.settings.opacity);
     state.settings.opacity = Number.isFinite(rawOpacity) ? clamp(rawOpacity, 0, 1) : 0.9;
     state.settings.bg_color = normalizeHex(state.settings.bg_color, DEFAULT_SETTINGS.bg_color);
+    state.settings.weather_api =
+      typeof state.settings.weather_api === "string" ? state.settings.weather_api.trim() : "";
+    state.settings.autostart = !!state.settings.autostart;
     state.settings.minimal = !!state.settings.minimal;
     state.settings.calendar = !!state.settings.calendar;
     if (!state.settings.holidays || typeof state.settings.holidays !== "object") {
@@ -788,12 +801,16 @@
     els.topSwitch.classList.toggle("on", !!s.always_on_top);
     els.topSwitch.setAttribute("aria-checked", String(!!s.always_on_top));
     setSwitch(els.minimalSwitch, !!s.minimal);
+    setSwitch(els.autostartSwitch, !!s.autostart);
     const color = normalizeHex(s.bg_color, DEFAULT_SETTINGS.bg_color);
     if (document.activeElement !== els.bgColor) els.bgColor.value = color;
     els.colorRow.querySelectorAll(".swatch").forEach((btn) => {
       btn.classList.toggle("active", String(btn.dataset.color).toLowerCase() === color);
     });
     if (document.activeElement !== els.cityInput) els.cityInput.value = s.city || "";
+    if (document.activeElement !== els.weatherApiInput) {
+      els.weatherApiInput.value = s.weather_api || "";
+    }
     els.bgPreview.hidden = !s.bg_image;
   }
 
@@ -1211,64 +1228,52 @@
     els.wcStatus.textContent = message || "";
   }
 
+  async function geocodeCity(city) {
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
+    const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(12000) });
+    if (!geoRes.ok) throw new Error("城市查询失败");
+    const geo = await geoRes.json();
+    const first = geo.results && geo.results[0];
+    if (!first) throw new Error(`找不到城市「${city}」`);
+    return first;
+  }
+
+  function fillWeatherUrl(template, s) {
+    return template
+      .replace(/\{city\}/g, encodeURIComponent((s.city || "").trim()))
+      .replace(/\{lat\}/g, s.latitude == null ? "" : String(s.latitude))
+      .replace(/\{lon\}/g, s.longitude == null ? "" : String(s.longitude));
+  }
+
   async function refreshWeather() {
     if (weatherBusy) return;
     const s = state.settings;
-    const city = (s.city || "").trim();
-    if (!city) {
-      setWcStatus("请先在设置中填写城市");
-      return;
-    }
     weatherBusy = true;
     try {
-      let lat = s.latitude;
-      let lon = s.longitude;
-
-      if (lat == null || lon == null) {
-        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
-        const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(12000) });
-        if (!geoRes.ok) throw new Error("城市查询失败");
-        const geo = await geoRes.json();
-        const first = geo.results && geo.results[0];
-        if (!first) throw new Error(`找不到城市「${city}」`);
-        lat = first.latitude;
-        lon = first.longitude;
-        s.latitude = lat;
-        s.longitude = lon;
-        if (first.name) s.city = first.name;
+      const custom = String(s.weather_api || "").trim();
+      const city = (s.city || "").trim();
+      const needsGeo = !custom || /\{lat\}|\{lon\}/.test(custom);
+      if (needsGeo) {
+        if (!city) throw new Error("请先在设置中填写城市");
+        if (s.latitude == null || s.longitude == null) {
+          const first = await geocodeCity(city);
+          s.latitude = first.latitude;
+          s.longitude = first.longitude;
+          if (first.name) s.city = first.name;
+        }
       }
 
-      const url =
-        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-        `&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m` +
-        `&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
-      if (!res.ok) throw new Error("天气请求失败");
-      const data = await res.json();
-      const daily = data.daily || {};
-      const dates = daily.time || [];
-      const days = dates.map((date, index) => ({
-        date,
-        code: Number(daily.weather_code?.[index] ?? 0),
-        hi: Math.round(Number(daily.temperature_2m_max?.[index] ?? 0)),
-        lo: Math.round(Number(daily.temperature_2m_min?.[index] ?? 0)),
-      }));
-      if (!days.length) throw new Error("暂无天气数据");
+      const url = custom
+        ? fillWeatherUrl(custom, s)
+        : `https://api.open-meteo.com/v1/forecast?latitude=${s.latitude}&longitude=${s.longitude}` +
+          `&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m` +
+          `&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7`;
 
-      const current = data.current || {};
-      state.weather = {
-        city: s.city,
-        lat,
-        lon,
-        current: {
-          temp: Math.round(Number(current.temperature_2m ?? 0)),
-          code: Number(current.weather_code ?? 0),
-          humidity: Math.round(Number(current.relative_humidity_2m ?? 0)),
-          wind: Math.round(Number(current.wind_speed_10m ?? 0)),
-        },
-        daily: days,
-        ts: Date.now() / 1000,
-      };
+      state.weather = await window.WeatherAPI.load(
+        url,
+        { city: s.city, lat: s.latitude, lon: s.longitude },
+        (target) => invoke("fetch_json", { url: target })
+      );
       networkOk = true;
       setWcStatus("");
       save();
@@ -1277,9 +1282,13 @@
       renderCalendar();
     } catch (err) {
       // 只有真正的网络层失败才视为「不可联网」，城市不存在等业务错误不影响悬停信息
-      if (err.name === "TimeoutError" || err.name === "TypeError") networkOk = false;
+      if (err && (err.name === "TimeoutError" || err.name === "TypeError")) networkOk = false;
       console.warn("weather failed", err);
-      setWcStatus(err.name === "TimeoutError" ? "天气请求超时" : err.message || "网络连接失败");
+      const message =
+        err && err.name === "TimeoutError"
+          ? "天气请求超时"
+          : (err && err.message) || String(err) || "网络连接失败";
+      setWcStatus(message);
     } finally {
       weatherBusy = false;
     }
@@ -2331,6 +2340,28 @@
     els.topSwitch.addEventListener("click", () => toggleAlwaysOnTop());
     els.exportBtn.addEventListener("click", () => exportRecentDone());
 
+    els.autostartSwitch.addEventListener("click", async () => {
+      const next = !state.settings.autostart;
+      try {
+        const applied = await invoke("set_autostart", { enabled: next });
+        state.settings.autostart = !!applied;
+        setSwitch(els.autostartSwitch, !!applied);
+        save();
+      } catch (err) {
+        console.warn("autostart failed", err);
+        setSwitch(els.autostartSwitch, state.settings.autostart);
+      }
+    });
+
+    // 设置面板按功能折叠
+    els.settingsPanel.querySelectorAll(".set-section-head").forEach((head) => {
+      head.addEventListener("click", () => {
+        const section = head.parentElement;
+        const open = section.classList.toggle("open");
+        head.setAttribute("aria-expanded", String(open));
+      });
+    });
+
     els.cityInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -2338,6 +2369,19 @@
       }
     });
     els.cityInput.addEventListener("change", () => changeCity());
+    els.weatherApiInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        els.weatherApiInput.blur();
+      }
+    });
+    els.weatherApiInput.addEventListener("change", () => {
+      state.settings.weather_api = els.weatherApiInput.value.trim();
+      state.weather = null;
+      save();
+      renderWeatherCard();
+      refreshWeather();
+    });
     els.locateBtn.addEventListener("click", () => locate());
 
     els.quitBtn.addEventListener("click", async () => {

@@ -89,82 +89,120 @@
         </button>
       </div>
 
-      <div class="set-row">
-        <div class="set-label">窗口透明度</div>
-        <div class="slider-row">
-          <input type="range" id="opacityRange" min="0" max="100" step="1">
-          <span class="value" id="opacityValue">10%</span>
-        </div>
-      </div>
+      <div class="set-section open" id="sectionUi">
+        <button class="set-section-head" type="button" aria-expanded="true">
+          <span>界面配置</span>
+          <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="set-section-body">
+          <div class="set-row">
+            <div class="set-label">窗口透明度</div>
+            <div class="slider-row">
+              <input type="range" id="opacityRange" min="0" max="100" step="1">
+              <span class="value" id="opacityValue">10%</span>
+            </div>
+          </div>
 
-      <div class="set-block">
-        <div class="set-label">背景色</div>
-        <div class="set-desc">玻璃面板的底色</div>
-        <div class="color-row" id="colorRow">
-          <button class="swatch" data-color="#342a72" style="--sw:#342a72" title="靛紫"></button>
-          <button class="swatch" data-color="#1b2f6b" style="--sw:#1b2f6b" title="深海蓝"></button>
-          <button class="swatch" data-color="#1d3b3b" style="--sw:#1d3b3b" title="松石绿"></button>
-          <button class="swatch" data-color="#3a1c3f" style="--sw:#3a1c3f" title="绛紫"></button>
-          <button class="swatch" data-color="#262430" style="--sw:#262430" title="石墨灰"></button>
-          <label class="color-custom" title="自定义颜色">
-            <input type="color" id="bgColor" value="#342a72">
-          </label>
-        </div>
-      </div>
+          <div class="set-block">
+            <div class="set-label">背景色</div>
+            <div class="set-desc">玻璃面板的底色</div>
+            <div class="color-row" id="colorRow">
+              <button class="swatch" data-color="#342a72" style="--sw:#342a72" title="靛紫"></button>
+              <button class="swatch" data-color="#1b2f6b" style="--sw:#1b2f6b" title="深海蓝"></button>
+              <button class="swatch" data-color="#1d3b3b" style="--sw:#1d3b3b" title="松石绿"></button>
+              <button class="swatch" data-color="#3a1c3f" style="--sw:#3a1c3f" title="绛紫"></button>
+              <button class="swatch" data-color="#262430" style="--sw:#262430" title="石墨灰"></button>
+              <label class="color-custom" title="自定义颜色">
+                <input type="color" id="bgColor" value="#342a72">
+              </label>
+            </div>
+          </div>
 
-      <div class="set-block">
-        <div class="set-label">背景图片</div>
-        <div class="bg-row">
-          <div class="bg-preview" id="bgPreview"></div>
-          <div class="bg-actions">
-            <button class="btn small" id="pickBg">选择图片</button>
-            <button class="btn small ghost" id="clearBg">清除</button>
+          <div class="set-block">
+            <div class="set-label">背景图片</div>
+            <div class="bg-row">
+              <div class="bg-preview" id="bgPreview"></div>
+              <div class="bg-actions">
+                <button class="btn small" id="pickBg">选择图片</button>
+                <button class="btn small ghost" id="clearBg">清除</button>
+              </div>
+            </div>
+            <div class="segmented" id="bgModes">
+              <button data-mode="stretch">拉伸</button>
+              <button data-mode="tile">平铺</button>
+              <button data-mode="fill">填充</button>
+            </div>
           </div>
         </div>
-        <div class="segmented" id="bgModes">
-          <button data-mode="stretch">拉伸</button>
-          <button data-mode="tile">平铺</button>
-          <button data-mode="fill">填充</button>
+      </div>
+
+      <div class="set-section" id="sectionSystem">
+        <button class="set-section-head" type="button" aria-expanded="false">
+          <span>系统配置</span>
+          <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="set-section-body">
+          <div class="set-row">
+            <div>
+              <div class="set-label">窗口置顶</div>
+              <div class="set-desc">始终显示在其他窗口上方</div>
+            </div>
+            <div class="switch" id="topSwitch" role="switch" aria-checked="true"><span></span></div>
+          </div>
+
+          <div class="set-row">
+            <div>
+              <div class="set-label">日历模式</div>
+              <div class="set-desc">日历页显示事项时长与天气，与极简模式互斥</div>
+            </div>
+            <div class="switch" id="calendarSwitch" role="switch" aria-checked="false"><span></span></div>
+          </div>
+
+          <div class="set-row">
+            <div>
+              <div class="set-label">极简模式</div>
+              <div class="set-desc">待办单行显示，超出用 … 省略，与日历模式互斥</div>
+            </div>
+            <div class="switch" id="minimalSwitch" role="switch" aria-checked="false"><span></span></div>
+          </div>
+
+          <div class="set-row">
+            <div>
+              <div class="set-label">允许开机启动</div>
+              <div class="set-desc">登录 Windows 后自动启动本程序</div>
+            </div>
+            <div class="switch" id="autostartSwitch" role="switch" aria-checked="false"><span></span></div>
+          </div>
+
+          <div class="set-row" id="exportRow">
+            <div>
+              <div class="set-label">导出近期待办</div>
+              <div class="set-desc">导出最近 30 天已完成的事项（创建时间，完成时间，内容）</div>
+            </div>
+            <button class="btn small" id="exportBtn">导出</button>
+          </div>
         </div>
       </div>
 
-      <div class="set-row">
-        <div>
-          <div class="set-label">日历模式</div>
-          <div class="set-desc">日历页显示事项时长与天气，与极简模式互斥</div>
-        </div>
-        <div class="switch" id="calendarSwitch" role="switch" aria-checked="false"><span></span></div>
-      </div>
+      <div class="set-section" id="sectionWeather">
+        <button class="set-section-head" type="button" aria-expanded="false">
+          <span>天气配置</span>
+          <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="set-section-body">
+          <div class="set-block">
+            <div class="set-label">天气城市</div>
+            <div class="city-row">
+              <input class="text-input" id="cityInput" placeholder="输入城市名称" spellcheck="false">
+              <button class="btn small" id="locateBtn">定位</button>
+            </div>
+          </div>
 
-      <div class="set-row" id="exportRow">
-        <div>
-          <div class="set-label">导出近期待办</div>
-          <div class="set-desc">导出最近 30 天已完成的事项（创建时间，完成时间，内容）</div>
-        </div>
-        <button class="btn small" id="exportBtn">导出</button>
-      </div>
-
-      <div class="set-row">
-        <div>
-          <div class="set-label">极简模式</div>
-          <div class="set-desc">待办单行显示，超出用 … 省略，与日历模式互斥</div>
-        </div>
-        <div class="switch" id="minimalSwitch" role="switch" aria-checked="false"><span></span></div>
-      </div>
-
-      <div class="set-row">
-        <div>
-          <div class="set-label">窗口置顶</div>
-          <div class="set-desc">始终显示在其他窗口上方</div>
-        </div>
-        <div class="switch" id="topSwitch" role="switch" aria-checked="true"><span></span></div>
-      </div>
-
-      <div class="set-block">
-        <div class="set-label">天气城市</div>
-        <div class="city-row">
-          <input class="text-input" id="cityInput" placeholder="输入城市名称" spellcheck="false">
-          <button class="btn small" id="locateBtn">定位</button>
+          <div class="set-block">
+            <div class="set-label">自定义天气接口</div>
+            <div class="set-desc">支持和风天气 / 彩云天气 / uapis.cn 的完整链接，留空则使用 Open-Meteo；链接中可用 {city}、{lat}、{lon} 占位符</div>
+            <input class="text-input" id="weatherApiInput" placeholder="https://api.qweather.com/v7/weather/7d?location=...&key=..." spellcheck="false">
+          </div>
         </div>
       </div>
 
@@ -226,6 +264,7 @@
   </div>
 </div>
 <script src="core.js"></script>
+<script src="weather.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
