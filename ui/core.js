@@ -99,6 +99,17 @@
     return out;
   }
 
+  // 透明度滑杆 -> sRGB alpha：按线性光换算（gamma 2.2），让 50% 看起来像 50%
+  const OPACITY_GAMMA = 2.2;
+
+  function opacityFromTransparency(t) {
+    return Math.min(1, Math.max(0, Math.pow(1 - Math.min(1, Math.max(0, t)), 1 / OPACITY_GAMMA)));
+  }
+
+  function transparencyFromOpacity(a) {
+    return Math.min(1, Math.max(0, 1 - Math.pow(Math.min(1, Math.max(0, a)), OPACITY_GAMMA)));
+  }
+
   return {
     SOLAR_TERMS,
     pad2,
@@ -109,5 +120,7 @@
     clipSegment,
     layoutBands,
     badgePlacements,
+    opacityFromTransparency,
+    transparencyFromOpacity,
   };
 });

@@ -225,15 +225,8 @@
     return Math.max(min, Math.min(max, value));
   }
 
-  // 透明度滑杆使用 smoothstep 感知曲线：alpha = 1 - smoothstep(t)。
-  // 线性映射时，靠近「不透明」和「全透」两端的拖动最敏感，稍动一下变化就很明显；
-  // smoothstep 在两端都趋于平缓，中段约等于一半，整个行程的观感更均匀。
-  const smoothstep = (t) => t * t * (3 - 2 * t);
-  const inverseSmoothstep = (x) =>
-    0.5 - Math.sin(Math.asin(clamp(1 - 2 * x, -1, 1)) / 3);
-  const opacityFromTransparency = (t) => clamp(1 - smoothstep(clamp(t, 0, 1)), 0, 1);
-  const transparencyFromOpacity = (a) =>
-    clamp(inverseSmoothstep(1 - clamp(a, 0, 1)), 0, 1);
+  // 透明度滑杆按线性光映射到 sRGB alpha（gamma 2.2），见 ui/core.js
+  const { opacityFromTransparency, transparencyFromOpacity } = window.TodoCore;
 
   function parseDue(todo) {
     if (!todo || !todo.due) return null;

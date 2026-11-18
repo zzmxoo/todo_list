@@ -178,6 +178,16 @@
     eq(out[1].count, 1);
   });
 
+  test('透明度按 gamma 2.2 映射并可逆', () => {
+    eq(core.opacityFromTransparency(0), 1);
+    eq(core.opacityFromTransparency(1), 0);
+    ok(Math.abs(core.opacityFromTransparency(0.5) - Math.pow(0.5, 1 / 2.2)) < 1e-9, '50%');
+    ok(Math.abs(core.transparencyFromOpacity(0.5) - (1 - Math.pow(0.5, 2.2))) < 1e-9, '反向');
+    const alpha = core.opacityFromTransparency(0.41);
+    ok(Math.abs(core.transparencyFromOpacity(alpha) - 0.41) < 1e-9, '往返');
+    ok(core.opacityFromTransparency(0.5) > 0.7, '50% 应保持较高不透明度');
+  });
+
   const passed = results.filter((r) => r.ok).length;
   return JSON.stringify({ passed: passed, failed: results.length - passed, results: results });
 })()
