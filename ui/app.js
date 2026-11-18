@@ -779,7 +779,7 @@
     if (edge === "top") hidden.y = r.y - size.height + sliver;
     if (edge === "bottom") hidden.y = r.y + r.h - sliver;
 
-    edgeHide = { edge, rect: r, size, hidden, shown, revealed: false };
+    edgeHide = { edge, rect: r, size, hidden, shown, revealed: false, armed: false };
     topDwellSince = 0;
     clearTimeout(topDwellTimer);
     clearTimeout(edgeRevealTimer);
@@ -831,6 +831,11 @@
         cursor.x <= hidden.x + size.width &&
         cursor.y >= hidden.y &&
         cursor.y <= hidden.y + size.height;
+      if (!edgeHide.armed) {
+        // 刚收起时鼠标可能还停在窄边上，先移开一次再允许悬停唤出
+        if (!inside) edgeHide.armed = true;
+        return;
+      }
       if (inside) {
         if (!edgeRevealTimer) {
           edgeRevealTimer = setTimeout(revealEdgeHide, EDGE_REVEAL_MS);
@@ -844,41 +849,21 @@
     }
   }
 
-  async function handleShownDrag() {
-    if (!edgeHide || !edgeHide.revealed) return;
-    let pos;
-    let size;
-    try {
-      pos = await win.outerPosition();
-      size = await win.outerSize();
-    } catch (err) {
-      return;
-    }
-    const r = edgeHide.rect;
-    let dist = 0;
-    if (edgeHide.edge === "left") dist = pos.x - r.x;
-    else if (edgeHide.edge === "right") dist = r.x + r.w - (pos.x + size.width);
-    else if (edgeHide.edge === "top") dist = pos.y - r.y;
-    else dist = r.y + r.h - (pos.y + size.height);
-
-    if (dist > 40) {
-      clearEdgeHide();
-      return;
-    }
-    // 沿边缘拖动时同步更新沿边位置
-    edgeHide.shown = { x: pos.x, y: pos.y };
-    if (edgeHide.edge === "top" || edgeHide.edge === "bottom") {
-      edgeHide.hidden.x = pos.x;
-    } else {
-      edgeHide.hidden.y = pos.y;
-    }
-  }
-
   async function handleMoveSettled() {
     if (!win) return;
     if (edgeHide) {
-      await handleShownDrag();
-      return;
+      // 隐藏 / 唤出状态下的位置变化：程序化移动忽略，用户拖动则退出隐藏模式
+      let pos;
+      try {
+        pos = await win.outerPosition();
+      } catch (err) {
+        return;
+      }
+      const ref = edgeHide.revealed ? edgeHide.shown : edgeHide.hidden;
+      const moved = Math.abs(pos.x - ref.x) + Math.abs(pos.y - ref.y);
+      if (moved <= 4) return;
+      clearEdgeHide();
+      return handleMoveSettled();
     }
     let pos;
     let size;
