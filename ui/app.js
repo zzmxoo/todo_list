@@ -188,6 +188,7 @@
   const MARGIN = 12;
   const SETTINGS_W = 404;
   const SETTINGS_H = 620;
+  const SNAP_DIST = 20;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
   const CAL_W = 393;
@@ -227,6 +228,7 @@
   let saveTimer = null;
   let lastDay = new Date().toDateString();
   let dragTimer = null;
+  let snapTimer = null;
   let tickCount = 0;
 
   /* ---------------------------------------------------------- utils */
@@ -658,6 +660,28 @@
     }
     state.settings.x = x;
     state.settings.y = y;
+  }
+
+  /** 拖动结束后贴近屏幕边缘时自动吸附 */
+  async function snapWindowToEdges() {
+    if (!win) return;
+    try {
+      const rect = await getWindowRect();
+      const avail = screenBounds();
+      let x = rect.x;
+      let y = rect.y;
+      if (Math.abs(rect.x - avail.left) <= SNAP_DIST) x = avail.left;
+      if (Math.abs(avail.right - (rect.x + rect.w)) <= SNAP_DIST) x = avail.right - rect.w;
+      if (Math.abs(rect.y - avail.top) <= SNAP_DIST) y = avail.top;
+      if (Math.abs(avail.bottom - (rect.y + rect.h)) <= SNAP_DIST) y = avail.bottom - rect.h;
+      if (Math.abs(x - rect.x) > 0.5 || Math.abs(y - rect.y) > 0.5) {
+        await setWindowPos(x, y);
+        state.settings.x = Math.round(x);
+        state.settings.y = Math.round(y);
+      }
+    } catch (err) {
+      /* ignore */
+    }
   }
 
   async function restorePosition() {
@@ -2401,6 +2425,17 @@
 
   // 全局：点击外部关闭弹窗、Esc、位置保存与退出前保存
   function bindWindowEvents() {
+    // 拖动停止后贴近屏幕边缘自动吸附
+    if (win && typeof win.onMoved === "function") {
+      win.onMoved(() => {
+        clearTimeout(snapTimer);
+        snapTimer = setTimeout(snapWindowToEdges, 160);
+      });
+    }
+    window.addEventListener("mouseup", () => {
+      clearTimeout(snapTimer);
+      snapTimer = setTimeout(snapWindowToEdges, 80);
+    });
     document.addEventListener(
       "pointerdown",
       (event) => {
