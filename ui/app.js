@@ -189,9 +189,8 @@
   const SETTINGS_W = 404;
   const SETTINGS_H = 620;
   const SNAP_DIST = 20;
-  // 上下边缘留 36px（原 48 减 1/4），左右边缘留 24px（原 48 的一半）
-  const EDGE_SLIVER_VERT = 36;
-  const EDGE_SLIVER_SIDE = 24;
+  // 窄边厚度：原 48 减小 1/4
+  const EDGE_SLIVER = 36;
   const EDGE_REVEAL_MS = 1200;
   const EDGE_LEAVE_MS = 700;
   const EDGE_HIDE_ANIM_MS = 420;
@@ -208,6 +207,7 @@
   const LogicalSize = tauri.dpi?.LogicalSize || tauri.window?.LogicalSize;
   const LogicalPosition = tauri.dpi?.LogicalPosition || tauri.window?.LogicalPosition;
   const PhysicalPosition = tauri.dpi?.PhysicalPosition || tauri.window?.PhysicalPosition;
+  const PhysicalSize = tauri.dpi?.PhysicalSize || tauri.window?.PhysicalSize;
   const convertFileSrc = tauri.core?.convertFileSrc;
 
   const state = { todos: [], settings: { ...DEFAULT_SETTINGS }, weather: null };
@@ -798,12 +798,13 @@
 
   async function enterEdgeHide(edge, r, pos, size) {
     if (edgeHide || !win) return;
-    const sliver = edge === "top" || edge === "bottom" ? EDGE_SLIVER_VERT : EDGE_SLIVER_SIDE;
+    const sliver = EDGE_SLIVER;
+    const resized = edge === "top" || edge === "bottom";
+    const halfW = resized ? Math.max(180, Math.round(size.width / 2)) : size.width;
     const shown = { x: pos.x, y: pos.y };
-    if (edge === "top" || edge === "bottom") {
-      shown.x = clamp(pos.x, r.x, Math.max(r.x, r.x + r.w - size.width));
-    }
-    if (edge === "left" || edge === "right") {
+    if (resized) {
+      shown.x = clamp(pos.x, r.x, Math.max(r.x, r.x + r.w - halfW));
+    } else {
       shown.y = clamp(pos.y, r.y, Math.max(r.y, r.y + r.h - size.height));
     }
     if (edge === "left") shown.x = r.x;
@@ -825,9 +826,10 @@
       shown,
       revealed: false,
       armed: false,
-      // 拖动过程中就收起：松开鼠标时系统会把窗口拉回拖动位置，需要重新收起
       pending: pointerDown,
       reassertUntil: 0,
+      resized,
+      halfW,
     };
     topDwellSince = 0;
     clearTimeout(topDwellTimer);
@@ -838,6 +840,13 @@
     closeDuePopover();
     closeCalAdd();
     startEdgePoll();
+    if (resized && PhysicalSize) {
+      try {
+        await win.setSize(new PhysicalSize(halfW, size.height));
+      } catch (err) {
+        /* ignore */
+      }
+    }
     await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS);
   }
 
@@ -846,16 +855,41 @@
     edgeHide.revealed = true;
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
+    if (edgeHide.resized && PhysicalSize) {
+      try {
+        await win.setSize(new PhysicalSize(edgeHide.size.width, edgeHide.size.height));
+      } catch (err) {
+        /* ignore */
+      }
+      edgeHide.shown.x = clamp(
+        edgeHide.shown.x,
+        edgeHide.rect.x,
+        Math.max(edgeHide.rect.x, edgeHide.rect.x + edgeHide.rect.w - edgeHide.size.width)
+      );
+    }
     await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
   }
 
   async function concealEdgeHide() {
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
+    if (edgeHide.resized && PhysicalSize) {
+      try {
+        await win.setSize(new PhysicalSize(edgeHide.halfW, edgeHide.size.height));
+      } catch (err) {
+        /* ignore */
+      }
+      edgeHide.hidden.x = clamp(
+        edgeHide.shown.x,
+        edgeHide.rect.x,
+        Math.max(edgeHide.rect.x, edgeHide.rect.x + edgeHide.rect.w - edgeHide.halfW)
+      );
+    }
     await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
   }
 
   function clearEdgeHide() {
+    const was = edgeHide;
     edgeHide = null;
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
@@ -863,6 +897,10 @@
     edgeLeaveTimer = null;
     clearInterval(edgePollTimer);
     edgePollTimer = null;
+    if (was && was.resized && PhysicalSize && win) {
+      win.setSize(new PhysicalSize(was.size.width, was.size.height)).catch(() => {});
+      scheduleLayout();
+    }
   }
 
   function startEdgePoll() {
@@ -1011,7 +1049,7 @@
   }
 
   async function doLayout() {
-    if (settingsOpen) return;
+    if (settingsOpen || edgeHide) return;
 
     const calendarOn = !!state.settings.calendar;
     const minimalOn = !calendarOn && !!state.settings.minimal;
