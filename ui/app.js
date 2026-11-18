@@ -207,7 +207,6 @@
   const LogicalSize = tauri.dpi?.LogicalSize || tauri.window?.LogicalSize;
   const LogicalPosition = tauri.dpi?.LogicalPosition || tauri.window?.LogicalPosition;
   const PhysicalPosition = tauri.dpi?.PhysicalPosition || tauri.window?.PhysicalPosition;
-  const PhysicalSize = tauri.dpi?.PhysicalSize || tauri.window?.PhysicalSize;
   const convertFileSrc = tauri.core?.convertFileSrc;
 
   const state = { todos: [], settings: { ...DEFAULT_SETTINGS }, weather: null };
@@ -415,6 +414,7 @@
     els.calNext = document.getElementById("calNext");
     els.calToday = document.getElementById("calToday");
     els.bgImage = document.getElementById("bgImage");
+    els.edgePeek = document.getElementById("edgePeek");
     els.settingsOverlay = document.getElementById("settingsOverlay");
     els.settingsPanel = document.getElementById("settingsPanel");
     els.settingsClose = document.getElementById("settingsClose");
@@ -799,11 +799,9 @@
   async function enterEdgeHide(edge, r, pos, size) {
     if (edgeHide || !win) return;
     const sliver = EDGE_SLIVER;
-    const resized = edge === "top" || edge === "bottom";
-    const halfW = resized ? Math.max(180, Math.round(size.width / 2)) : size.width;
     const shown = { x: pos.x, y: pos.y };
-    if (resized) {
-      shown.x = clamp(pos.x, r.x, Math.max(r.x, r.x + r.w - halfW));
+    if (edge === "top" || edge === "bottom") {
+      shown.x = clamp(pos.x, r.x, Math.max(r.x, r.x + r.w - size.width));
     } else {
       shown.y = clamp(pos.y, r.y, Math.max(r.y, r.y + r.h - size.height));
     }
@@ -827,9 +825,6 @@
       revealed: false,
       armed: false,
       pending: pointerDown,
-      reassertUntil: 0,
-      resized,
-      halfW,
     };
     topDwellSince = 0;
     clearTimeout(topDwellTimer);
@@ -839,15 +834,27 @@
     hideCalInfo();
     closeDuePopover();
     closeCalAdd();
+    showEdgePeek(edge);
     startEdgePoll();
-    if (resized && PhysicalSize) {
-      try {
-        await win.setSize(new PhysicalSize(halfW, size.height));
-      } catch (err) {
-        /* ignore */
-      }
-    }
     await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS);
+  }
+
+  function showEdgePeek(edge) {
+    if (!els.app) return;
+    els.app.classList.add("edge-hidden", `edge-hidden-${edge}`);
+    if (els.edgePeek) els.edgePeek.hidden = false;
+  }
+
+  function hideEdgePeek() {
+    if (!els.app) return;
+    els.app.classList.remove(
+      "edge-hidden",
+      "edge-hidden-top",
+      "edge-hidden-bottom",
+      "edge-hidden-left",
+      "edge-hidden-right"
+    );
+    if (els.edgePeek) els.edgePeek.hidden = true;
   }
 
   async function revealEdgeHide() {
@@ -855,41 +862,21 @@
     edgeHide.revealed = true;
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
-    if (edgeHide.resized && PhysicalSize) {
-      try {
-        await win.setSize(new PhysicalSize(edgeHide.size.width, edgeHide.size.height));
-      } catch (err) {
-        /* ignore */
-      }
-      edgeHide.shown.x = clamp(
-        edgeHide.shown.x,
-        edgeHide.rect.x,
-        Math.max(edgeHide.rect.x, edgeHide.rect.x + edgeHide.rect.w - edgeHide.size.width)
-      );
-    }
+    hideEdgePeek();
+    els.app.classList.add("edge-appearing");
+    setTimeout(() => els.app.classList.remove("edge-appearing"), 380);
     await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
   }
 
   async function concealEdgeHide() {
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
-    if (edgeHide.resized && PhysicalSize) {
-      try {
-        await win.setSize(new PhysicalSize(edgeHide.halfW, edgeHide.size.height));
-      } catch (err) {
-        /* ignore */
-      }
-      edgeHide.hidden.x = clamp(
-        edgeHide.shown.x,
-        edgeHide.rect.x,
-        Math.max(edgeHide.rect.x, edgeHide.rect.x + edgeHide.rect.w - edgeHide.halfW)
-      );
-    }
+    els.app.classList.remove("edge-appearing");
+    showEdgePeek(edgeHide.edge);
     await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
   }
 
   function clearEdgeHide() {
-    const was = edgeHide;
     edgeHide = null;
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
@@ -897,10 +884,8 @@
     edgeLeaveTimer = null;
     clearInterval(edgePollTimer);
     edgePollTimer = null;
-    if (was && was.resized && PhysicalSize && win) {
-      win.setSize(new PhysicalSize(was.size.width, was.size.height)).catch(() => {});
-      scheduleLayout();
-    }
+    hideEdgePeek();
+    if (els.app) els.app.classList.remove("edge-appearing");
   }
 
   function startEdgePoll() {
@@ -1184,13 +1169,16 @@
       els.addRow.innerHTML = DEFAULT_BODY();
     }
 
-    const list = sortTodos(state.todos);
+    // 已完成的事项不再显示在待办清单里（仍保留在数据与导出中）
+    const list = sortTodos(state.todos).filter((todo) => !todo.done);
     els.todoList.innerHTML = "";
 
     if (!list.length) {
       const hint = document.createElement("div");
       hint.className = "empty-hint";
-      hint.innerHTML = "暂无待办<div class=\"sub\">点击空白处或下方「添加待办」开始记录</div>";
+      hint.innerHTML = state.todos.length
+        ? "全部完成<div class=\"sub\">已完成的事项不再显示，点击下方「添加待办」继续记录</div>"
+        : "暂无待办<div class=\"sub\">点击空白处或下方「添加待办」开始记录</div>";
       els.todoList.appendChild(hint);
     }
 
@@ -1284,8 +1272,8 @@
 
   function toggleDone(id) {
     const index = state.todos.findIndex((todo) => todo.id === id);
-    if (index < 0) return;
-    state.todos[index] = applyDone(state.todos[index], !state.todos[index].done);
+    if (index < 0 || state.todos[index].done) return;
+    state.todos[index] = applyDone(state.todos[index], true);
     commitTodos();
   }
 
