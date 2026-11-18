@@ -186,6 +186,8 @@
   const WEATHER_W = 250;
   const GAP = 12;
   const MARGIN = 12;
+  const SETTINGS_W = 404;
+  const SETTINGS_H = 620;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
   const CAL_W = 393;
@@ -1777,15 +1779,18 @@
     const rect = await getWindowRect();
     settingsSavedSize = { w: rect.w, h: rect.h };
 
+    // 设置以右侧浮动面板展开，窗口加宽，待办卡片保持可见
     const avail = screenBounds();
-    const targetW = Math.max(rect.w, 470);
-    const targetH = Math.min(Math.max(rect.h, 620), avail.bottom - avail.top);
+    const extra = SETTINGS_W + GAP + MARGIN;
+    const targetW = Math.min(rect.w + extra, avail.right - avail.left - 8);
+    const targetH = Math.min(Math.max(rect.h, SETTINGS_H), avail.bottom - avail.top);
     let targetY = rect.y;
     if (targetY + targetH > avail.bottom) {
       targetY = Math.max(avail.top, avail.bottom - targetH);
     }
     if (targetY !== rect.y) await setWindowPos(rect.x, targetY);
     await setWindowSize(targetW, targetH);
+    await clampWindowPosition();
 
     els.settingsOverlay.hidden = false;
   }
@@ -2247,6 +2252,20 @@
     els.settingsOverlay.addEventListener("click", (event) => {
       if (event.target === els.settingsOverlay) closeSettings();
     });
+
+    // 拖动设置面板标题栏移动窗口
+    const settingsHead = els.settingsPanel.querySelector(".settings-head");
+    if (settingsHead) {
+      settingsHead.addEventListener("mousedown", (event) => {
+        if (event.button !== 0 || event.target.closest("button")) return;
+        hideCalInfo();
+        try {
+          if (win) win.startDragging();
+        } catch (err) {
+          /* ignore */
+        }
+      });
+    }
 
     els.opacityRange.addEventListener("input", () => {
       const transparency = Number(els.opacityRange.value);
