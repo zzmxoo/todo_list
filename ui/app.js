@@ -1964,13 +1964,25 @@
 
   /* ------------------------------------------------------------ events */
   function wireEvents() {
+    bindShellEvents();
+    bindTodoEvents();
+    bindCalendarEvents();
+    bindSettingsEvents();
+    bindWindowEvents();
+  }
+
+  // 顶部栏：天气胶囊、设置入口
+  function bindShellEvents() {
     els.header.addEventListener("dblclick", (event) => {
       if (!event.target.closest("button")) return;
     });
 
     els.weatherPill.addEventListener("click", () => toggleWeather());
     els.settingsBtn.addEventListener("click", () => openSettings());
+  }
 
+  // 待办：列表操作、添加、截止时间与日历添加弹窗
+  function bindTodoEvents() {
     els.todoList.addEventListener("click", (event) => {
       const action = event.target.closest(".act-btn");
       if (action) {
@@ -2006,6 +2018,65 @@
       startAdd();
     });
 
+    els.dueOk.addEventListener("click", () => commitDue());
+    els.dueClear.addEventListener("click", () => clearDue());
+
+    els.calAddOk.addEventListener("click", () => submitCalAdd());
+    els.calAddCancel.addEventListener("click", () => closeCalAdd());
+    els.calAddClock.addEventListener("click", () => toggleCalAddTime());
+    els.calAddDate.addEventListener("change", () => applyCalAddTime());
+    els.calAddTimeValue.addEventListener("change", () => applyCalAddTime());
+    els.calAddDate.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyCalAddTime();
+        submitCalAdd();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeCalAdd();
+      }
+    });
+    els.calAddTimeValue.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyCalAddTime();
+        submitCalAdd();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeCalAdd();
+      }
+    });
+    els.calAddInput.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitCalAdd();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeCalAdd();
+      }
+    });
+
+    els.duePopover.querySelectorAll("[data-quick]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const now = new Date();
+        const target = new Date(now);
+        if (btn.dataset.quick === "today18") {
+          target.setHours(18, 0, 0, 0);
+        } else {
+          target.setDate(target.getDate() + 1);
+          target.setHours(9, 0, 0, 0);
+        }
+        els.dueDate.value = ymd(target);
+        els.dueTime.value = hm(target);
+      });
+    });
+  }
+
+  // 日历：月份导航、日期格交互、悬停信息与拖动
+  function bindCalendarEvents() {
     els.calPrev.addEventListener("click", () => {
       monthCursor = { y: monthCursor.y, m: monthCursor.m - 1 };
       if (monthCursor.m < 0) {
@@ -2137,7 +2208,10 @@
     window.addEventListener("mouseup", () => {
       calPress = null;
     });
+  }
 
+  // 设置面板全部控件
+  function bindSettingsEvents() {
     els.settingsClose.addEventListener("click", () => closeSettings());
     els.settingsDone.addEventListener("click", () => closeSettings());
     els.settingsOverlay.addEventListener("click", (event) => {
@@ -2250,63 +2324,10 @@
         console.warn(err);
       }
     });
+  }
 
-    els.dueOk.addEventListener("click", () => commitDue());
-    els.dueClear.addEventListener("click", () => clearDue());
-
-    els.calAddOk.addEventListener("click", () => submitCalAdd());
-    els.calAddCancel.addEventListener("click", () => closeCalAdd());
-    els.calAddClock.addEventListener("click", () => toggleCalAddTime());
-    els.calAddDate.addEventListener("change", () => applyCalAddTime());
-    els.calAddTimeValue.addEventListener("change", () => applyCalAddTime());
-    els.calAddDate.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        applyCalAddTime();
-        submitCalAdd();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        closeCalAdd();
-      }
-    });
-    els.calAddTimeValue.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        applyCalAddTime();
-        submitCalAdd();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        closeCalAdd();
-      }
-    });
-    els.calAddInput.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
-      if (event.key === "Enter") {
-        event.preventDefault();
-        submitCalAdd();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        closeCalAdd();
-      }
-    });
-
-    els.duePopover.querySelectorAll("[data-quick]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const now = new Date();
-        const target = new Date(now);
-        if (btn.dataset.quick === "today18") {
-          target.setHours(18, 0, 0, 0);
-        } else {
-          target.setDate(target.getDate() + 1);
-          target.setHours(9, 0, 0, 0);
-        }
-        els.dueDate.value = ymd(target);
-        els.dueTime.value = hm(target);
-      });
-    });
-
+  // 全局：点击外部关闭弹窗、Esc、位置保存与退出前保存
+  function bindWindowEvents() {
     document.addEventListener(
       "pointerdown",
       (event) => {
