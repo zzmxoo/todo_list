@@ -543,6 +543,20 @@
     };
   }
 
+  // 待办写操作的统一出口：保存 + 重绘 + 布局
+  function commitTodos(options = {}) {
+    save();
+    renderTodos();
+    if (options.layout === false) return Promise.resolve();
+    const pending = scheduleLayout();
+    if (options.scrollBottom) {
+      pending.then(() => {
+        els.todoList.scrollTop = els.todoList.scrollHeight;
+      });
+    }
+    return pending;
+  }
+
   async function savePosition() {
     if (!win || settingsOpen) return;
     try {
@@ -858,37 +872,27 @@
     });
     if (!todo) return null;
     state.todos.push(todo);
-    save();
-    renderTodos();
-    scheduleLayout().then(() => {
-      els.todoList.scrollTop = els.todoList.scrollHeight;
-    });
+    commitTodos({ scrollBottom: true });
     return todo;
   }
 
   function deleteTodo(id) {
     state.todos = state.todos.filter((todo) => todo.id !== id);
-    save();
-    renderTodos();
-    scheduleLayout();
+    commitTodos();
   }
 
   function toggleDone(id) {
     const index = state.todos.findIndex((todo) => todo.id === id);
     if (index < 0) return;
     state.todos[index] = applyDone(state.todos[index], !state.todos[index].done);
-    save();
-    renderTodos();
-    scheduleLayout();
+    commitTodos();
   }
 
   function togglePin(id) {
     const todo = findTodo(id);
     if (!todo) return;
     todo.pinned = !todo.pinned;
-    save();
-    renderTodos();
-    scheduleLayout();
+    commitTodos();
   }
 
   /* ------------------------------------------------------ inline edit */
@@ -912,12 +916,14 @@
       if (finished) return;
       finished = true;
       const value = input.value.trim();
-      if (commit && value && value !== todo.text) {
-        todo.text = value;
-        save();
+      const changed = commit && value && value !== todo.text;
+      if (changed) todo.text = value;
+      if (changed) {
+        commitTodos();
+      } else {
+        renderTodos();
+        scheduleLayout();
       }
-      renderTodos();
-      scheduleLayout();
     };
 
     input.addEventListener("keydown", (event) => {
@@ -1030,10 +1036,8 @@
       const time = els.dueTime.value || "09:00";
       todo.due = `${els.dueDate.value}T${time}`;
     }
-    save();
     closeDuePopover();
-    renderTodos();
-    scheduleLayout();
+    commitTodos();
   }
 
   function clearDue() {
@@ -1041,11 +1045,9 @@
     const todo = findTodo(dueTodoId);
     if (todo) {
       todo.due = null;
-      save();
     }
     closeDuePopover();
-    renderTodos();
-    scheduleLayout();
+    commitTodos();
   }
 
   /* ------------------------------------------------------- calendar add */
@@ -1787,11 +1789,7 @@
     setSwitch(els.minimalSwitch, state.settings.minimal);
     document.body.classList.toggle("calendar-mode", state.settings.calendar);
     document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
-    save();
-    renderTodos();
-    if (!settingsOpen) {
-      await scheduleLayout();
-    }
+    await commitTodos({ layout: !settingsOpen });
   }
 
   async function toggleAlwaysOnTop() {
@@ -2182,9 +2180,7 @@
       setSwitch(els.calendarSwitch, state.settings.calendar);
       document.body.classList.toggle("calendar-mode", state.settings.calendar);
       document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
-      save();
-      renderTodos();
-      if (!settingsOpen) scheduleLayout();
+      commitTodos({ layout: !settingsOpen });
     });
 
     els.bgModes.addEventListener("click", (event) => {

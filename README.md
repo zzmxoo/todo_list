@@ -36,7 +36,7 @@ cargo build            # 调试版：target\debug\desktop-todo.exe
 cargo build --release  # 发布版：target\release\desktop-todo.exe
 ```
 
-前端在 `ui/` 目录（纯 HTML/CSS/JS，无 Node 构建步骤）；Tauri 配置、Rust 命令在 `src-tauri/`。纯函数集中在 `ui/core.js`；天气解析与各数据源适配集中在 `ui/weather.js`（`WeatherAPI`），便于单独测试和继续加数据源。
+前端在 `ui/` 目录（纯 HTML/CSS/JS，无 Node 构建步骤）；Tauri 配置、Rust 命令在 `src-tauri/`。纯函数集中在 `ui/core.js`；待办、日历、节假日、每日一句的领域规则在 `ui/domain/`（todo / calendar / holiday / quote），只处理普通对象、不碰 DOM；天气解析与各数据源适配集中在 `ui/weather.js`（`WeatherAPI`）。待办写操作统一走 `commitTodos()`，负责保存、重绘与布局。
 
 单元测试在 `tests/` 下，借 WebView2 的 JS 引擎运行：先带调试端口启动程序，再执行测试脚本。
 
