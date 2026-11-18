@@ -924,7 +924,7 @@ body.calendar-mode .cal-weather {
 
 .settings {
   width: 100%;
-  max-width: 404px;
+  max-width: 480px;
   max-height: 100%;
   overflow-y: auto;
   padding: 16px;
@@ -952,37 +952,62 @@ body.calendar-mode .cal-weather {
 .settings-title { font-size: 15px; font-weight: 600; }
 .settings-head .icon-btn { margin-left: auto; }
 
-.set-section {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+.settings-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
-.set-section:first-of-type { border-top: none; }
 
-.set-section-head {
-  width: 100%;
+.settings-nav {
+  flex: 0 0 38px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.set-tab {
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 0;
-  border: 0;
-  background: none;
-  color: #e9f0ff;
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: .3px;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(230, 240, 255, 0.72);
   cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
-.set-section-head .chev {
-  opacity: .65;
-  transition: transform 160ms ease;
+.set-tab:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
 }
 
-.set-section.open .set-section-head .chev { transform: rotate(180deg); }
+.set-tab.active {
+  background: rgba(91, 140, 255, 0.22);
+  border-color: rgba(91, 140, 255, 0.5);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(91, 140, 255, 0.25);
+}
 
-.set-section-body { display: none; padding-bottom: 4px; }
-.set-section.open .set-section-body { display: block; }
-.set-section-body > :first-child { border-top: none; }
+.settings-pages {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.set-page { display: none; }
+.set-page.active {
+  display: block;
+  animation: page-in 140ms ease;
+}
+.set-page > :first-child { border-top: none; }
+.set-page .text-input { width: 100%; }
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateX(6px); }
+  to { opacity: 1; transform: none; }
+}
 
 .set-row {
   display: flex;

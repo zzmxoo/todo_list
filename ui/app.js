@@ -1887,7 +1887,7 @@
     settingsSavedSize = { w: rect.w, h: rect.h };
 
     const avail = screenBounds();
-    const targetW = Math.max(rect.w, 400);
+    const targetW = Math.max(rect.w, 470);
     const targetH = Math.min(Math.max(rect.h, 620), avail.bottom - avail.top);
     let targetY = rect.y;
     if (targetY + targetH > avail.bottom) {
@@ -2353,12 +2353,15 @@
       }
     });
 
-    // 设置面板按功能折叠
-    els.settingsPanel.querySelectorAll(".set-section-head").forEach((head) => {
-      head.addEventListener("click", () => {
-        const section = head.parentElement;
-        const open = section.classList.toggle("open");
-        head.setAttribute("aria-expanded", String(open));
+    // 设置分类：左侧图标切换右侧配置页
+    els.settingsPanel.querySelectorAll(".set-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        els.settingsPanel.querySelectorAll(".set-tab").forEach((item) => {
+          item.classList.toggle("active", item === tab);
+        });
+        els.settingsPanel.querySelectorAll(".set-page").forEach((page) => {
+          page.classList.toggle("active", page.dataset.page === tab.dataset.tab);
+        });
       });
     });
 
