@@ -227,73 +227,12 @@
 
   // 透明度滑杆按线性光映射到 sRGB alpha（gamma 2.2），见 ui/core.js
   const { opacityFromTransparency, transparencyFromOpacity } = window.TodoCore;
-
-  function parseDue(todo) {
-    if (!todo || !todo.due) return null;
-    const d = new Date(todo.due);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
+  // 待办领域规则集中在 ui/domain/todo.js
+  const { parseDue, dueState, dueText, todoDuration, sortTodos, createTodo, applyDone } =
+    window.TodoDomain;
 
   function wmoInfo(code) {
     return WMO[Number(code)] || ["未知", "cloud"];
-  }
-
-  function dueState(todo) {
-    const due = parseDue(todo);
-    if (!due) return "none";
-    if (todo.done) return "done";
-    const diff = due.getTime() - Date.now();
-    if (diff < 0) return "overdue";
-    if (diff <= 30 * 60 * 1000) return "soon";
-    return "normal";
-  }
-
-  function dueText(todo) {
-    const due = parseDue(todo);
-    if (!due) return "";
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const target = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-    const diffDays = Math.round((target - today) / 86400000);
-    if (diffDays === 0) return `今天 ${hm(due)}`;
-    if (diffDays === 1) return `明天 ${hm(due)}`;
-    if (diffDays === -1) return `昨天 ${hm(due)}`;
-    const prefix = due.getFullYear() === now.getFullYear() ? "" : `${due.getFullYear()}年`;
-    return `${prefix}${due.getMonth() + 1}月${due.getDate()}日 ${hm(due)}`;
-  }
-
-  /** 从开始（日历中添加时指定，否则为创建时间）到截止的时长。 */
-  function todoDuration(todo, due) {
-    const start = todo.start
-      ? new Date(todo.start)
-      : todo.created
-        ? new Date(todo.created)
-        : null;
-    if (!start || Number.isNaN(start.getTime()) || due <= start) return "";
-    const mins = Math.round((due.getTime() - start.getTime()) / 60000);
-    if (mins < 10) return "";
-    if (mins < 60) return `${mins}分`;
-    if (mins < 24 * 60) {
-      const h = Math.floor(mins / 60);
-      const m = Math.round(mins % 60);
-      return m >= 10 ? `${h}时${m}分` : `${h}时`;
-    }
-    return `${Math.round(mins / 1440)}天`;
-  }
-
-  function sortTodos(list) {
-    return list
-      .map((todo, index) => ({ todo, index }))
-      .sort((a, b) => {
-        const pinA = a.todo.pinned ? 0 : 1;
-        const pinB = b.todo.pinned ? 0 : 1;
-        if (pinA !== pinB) return pinA - pinB;
-        const doneA = a.todo.done ? 1 : 0;
-        const doneB = b.todo.done ? 1 : 0;
-        if (doneA !== doneB) return doneA - doneB;
-        return a.index - b.index;
-      })
-      .map((item) => item.todo);
   }
 
   function toFileUrl(path) {
@@ -910,18 +849,13 @@
   }
 
   function addTodo(text, options = {}) {
-    const value = String(text || "").trim();
-    if (!value) return null;
-    const todo = {
+    const todo = createTodo({
       id: crypto.randomUUID(),
-      text: value,
-      done: false,
-      done_at: null,
-      pinned: false,
-      due: options.due || null,
-      start: options.start || null,
-      created: new Date().toISOString(),
-    };
+      text,
+      due: options.due,
+      start: options.start,
+    });
+    if (!todo) return null;
     state.todos.push(todo);
     save();
     renderTodos();
@@ -939,10 +873,9 @@
   }
 
   function toggleDone(id) {
-    const todo = findTodo(id);
-    if (!todo) return;
-    todo.done = !todo.done;
-    todo.done_at = todo.done ? new Date().toISOString() : null;
+    const index = state.todos.findIndex((todo) => todo.id === id);
+    if (index < 0) return;
+    state.todos[index] = applyDone(state.todos[index], !state.todos[index].done);
     save();
     renderTodos();
     scheduleLayout();
