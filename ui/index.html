@@ -142,6 +142,33 @@
                 <button data-mode="fill">填充</button>
               </div>
             </div>
+
+            <div class="set-block">
+              <div class="set-label">字体</div>
+              <select class="text-input select-input" id="fontSelect">
+                <option value="default">默认（微软雅黑）</option>
+                <option value="yahei">微软雅黑</option>
+                <option value="simsun">宋体</option>
+                <option value="kaiti">楷体</option>
+                <option value="fangsong">仿宋</option>
+                <option value="simhei">黑体</option>
+                <option value="dengxian">等线</option>
+              </select>
+            </div>
+
+            <div class="set-block">
+              <div class="set-label">字体颜色</div>
+              <div class="color-row" id="fontColorRow">
+                <button class="swatch" data-color="#eaf1ff" style="--sw:#eaf1ff" title="默认"></button>
+                <button class="swatch" data-color="#ffffff" style="--sw:#ffffff" title="纯白"></button>
+                <button class="swatch" data-color="#ffe9c7" style="--sw:#ffe9c7" title="暖白"></button>
+                <button class="swatch" data-color="#d7f5e9" style="--sw:#d7f5e9" title="青白"></button>
+                <button class="swatch" data-color="#ffd6e7" style="--sw:#ffd6e7" title="粉白"></button>
+                <label class="color-custom" title="自定义颜色">
+                  <input type="color" id="fontColor" value="#eaf1ff">
+                </label>
+              </div>
+            </div>
           </section>
 
           <section class="set-page active" data-page="system">

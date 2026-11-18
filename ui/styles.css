@@ -1234,6 +1234,17 @@ input[type="range"]::-webkit-slider-thumb {
   transition: border-color 120ms ease, background 120ms ease;
 }
 
+.select-input {
+  width: 100%;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.select-input option {
+  background: #1a1730;
+  color: #eaf1ff;
+}
+
 .text-input:focus { border-color: rgba(91, 140, 255, 0.65); background: rgba(91, 140, 255, 0.08); }
 
 .btn {

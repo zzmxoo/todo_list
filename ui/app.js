@@ -7,6 +7,8 @@
     bg_image: "",
     bg_mode: "fill",
     bg_color: "#342a72",
+    font_family: "default",
+    font_color: "#eaf1ff",
     minimal: false,
     calendar: false,
     always_on_top: true,
@@ -19,6 +21,16 @@
     holidays: {},
     x: null,
     y: null,
+  };
+
+  const FONT_STACKS = {
+    default: '"Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif',
+    yahei: '"Microsoft YaHei UI", "Microsoft YaHei", sans-serif',
+    simsun: 'SimSun, "Songti SC", serif',
+    kaiti: 'KaiTi, "STKaiti", "Kaiti SC", serif',
+    fangsong: 'FangSong, "STFangsong", serif',
+    simhei: 'SimHei, "Microsoft YaHei", sans-serif',
+    dengxian: 'DengXian, "Microsoft YaHei", sans-serif',
   };
 
   const WMO = {
@@ -391,6 +403,9 @@
     els.bgPreview = document.getElementById("bgPreview");
     els.colorRow = document.getElementById("colorRow");
     els.bgColor = document.getElementById("bgColor");
+    els.fontSelect = document.getElementById("fontSelect");
+    els.fontColorRow = document.getElementById("fontColorRow");
+    els.fontColor = document.getElementById("fontColor");
     els.pickBg = document.getElementById("pickBg");
     els.clearBg = document.getElementById("clearBg");
     els.bgModes = document.getElementById("bgModes");
@@ -499,6 +514,13 @@
     const rawOpacity = Number(state.settings.opacity);
     state.settings.opacity = Number.isFinite(rawOpacity) ? clamp(rawOpacity, 0, 1) : 0.9;
     state.settings.bg_color = normalizeHex(state.settings.bg_color, DEFAULT_SETTINGS.bg_color);
+    state.settings.font_family = FONT_STACKS[state.settings.font_family]
+      ? state.settings.font_family
+      : "default";
+    state.settings.font_color = normalizeHex(
+      state.settings.font_color,
+      DEFAULT_SETTINGS.font_color
+    );
     state.settings.weather_api =
       typeof state.settings.weather_api === "string" ? state.settings.weather_api.trim() : "";
     state.settings.autostart = !!state.settings.autostart;
@@ -717,6 +739,14 @@
     const s = state.settings;
     els.app.style.setProperty("--op", String(s.opacity));
     applyGlassColor(normalizeHex(s.bg_color, DEFAULT_SETTINGS.bg_color));
+    document.documentElement.style.setProperty(
+      "--font",
+      FONT_STACKS[s.font_family] || FONT_STACKS.default
+    );
+    document.documentElement.style.setProperty(
+      "--text",
+      normalizeHex(s.font_color, DEFAULT_SETTINGS.font_color)
+    );
 
     // 背景图填充到卡片内部，外层画布保持透明
     const hasBg = !!s.bg_image;
@@ -754,6 +784,12 @@
     if (document.activeElement !== els.bgColor) els.bgColor.value = color;
     els.colorRow.querySelectorAll(".swatch").forEach((btn) => {
       btn.classList.toggle("active", String(btn.dataset.color).toLowerCase() === color);
+    });
+    els.fontSelect.value = FONT_STACKS[s.font_family] ? s.font_family : "default";
+    const fontColor = normalizeHex(s.font_color, DEFAULT_SETTINGS.font_color);
+    if (document.activeElement !== els.fontColor) els.fontColor.value = fontColor;
+    els.fontColorRow.querySelectorAll(".swatch").forEach((btn) => {
+      btn.classList.toggle("active", String(btn.dataset.color).toLowerCase() === fontColor);
     });
     if (document.activeElement !== els.cityInput) els.cityInput.value = s.city || "";
     if (document.activeElement !== els.weatherApiInput) {
@@ -2235,6 +2271,30 @@
 
     els.bgColor.addEventListener("input", () => {
       state.settings.bg_color = normalizeHex(els.bgColor.value, DEFAULT_SETTINGS.bg_color);
+      applyAppearance();
+      syncSettingsUi();
+      save();
+    });
+
+    els.fontSelect.addEventListener("change", () => {
+      state.settings.font_family = FONT_STACKS[els.fontSelect.value]
+        ? els.fontSelect.value
+        : "default";
+      applyAppearance();
+      save();
+    });
+
+    els.fontColorRow.addEventListener("click", (event) => {
+      const btn = event.target.closest(".swatch");
+      if (!btn) return;
+      state.settings.font_color = normalizeHex(btn.dataset.color, DEFAULT_SETTINGS.font_color);
+      applyAppearance();
+      syncSettingsUi();
+      save();
+    });
+
+    els.fontColor.addEventListener("input", () => {
+      state.settings.font_color = normalizeHex(els.fontColor.value, DEFAULT_SETTINGS.font_color);
       applyAppearance();
       syncSettingsUi();
       save();
