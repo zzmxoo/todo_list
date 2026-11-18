@@ -189,6 +189,10 @@
   const SETTINGS_W = 404;
   const SETTINGS_H = 620;
   const SNAP_DIST = 20;
+  const EDGE_SLIVER = 28;
+  const EDGE_REVEAL_MS = 1200;
+  const EDGE_LEAVE_MS = 700;
+  const TOP_DWELL_MS = 2000;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
   const CAL_W = 393;
@@ -199,6 +203,7 @@
   const win = tauri.window?.getCurrentWindow?.() || null;
   const LogicalSize = tauri.dpi?.LogicalSize || tauri.window?.LogicalSize;
   const LogicalPosition = tauri.dpi?.LogicalPosition || tauri.window?.LogicalPosition;
+  const PhysicalPosition = tauri.dpi?.PhysicalPosition || tauri.window?.PhysicalPosition;
   const convertFileSrc = tauri.core?.convertFileSrc;
 
   const state = { todos: [], settings: { ...DEFAULT_SETTINGS }, weather: null };
@@ -228,7 +233,14 @@
   let saveTimer = null;
   let lastDay = new Date().toDateString();
   let dragTimer = null;
-  let snapTimer = null;
+  let moveSettleTimer = null;
+  let edgeHide = null;
+  let edgeRevealTimer = null;
+  let edgeLeaveTimer = null;
+  let edgePollTimer = null;
+  let topDwellSince = 0;
+  let topDwellTimer = null;
+  let pointerDown = false;
   let tickCount = 0;
 
   /* ---------------------------------------------------------- utils */
@@ -585,6 +597,7 @@
 
   async function savePosition() {
     if (!win || settingsOpen) return;
+    if (edgeHide) return; // 隐藏时保留进入隐藏前的位置
     try {
       const rect = await getWindowRect();
       if (rect.x !== state.settings.x || rect.y !== state.settings.y) {
@@ -649,6 +662,7 @@
 
   /** 尺寸变化后把窗口拉回屏幕可用区域，避免底部被任务栏裁切。 */
   async function clampWindowPosition() {
+    if (edgeHide) return;
     const rect = await getWindowRect();
     const avail = screenBounds();
     const maxX = Math.max(avail.left, avail.right - rect.w);
@@ -664,7 +678,7 @@
 
   /** 拖动结束后贴近屏幕边缘时自动吸附 */
   async function snapWindowToEdges() {
-    if (!win) return;
+    if (!win || edgeHide) return;
     try {
       const rect = await getWindowRect();
       const avail = screenBounds();
@@ -682,6 +696,249 @@
     } catch (err) {
       /* ignore */
     }
+  }
+
+  /* ------------------------------------------------------ edge hide */
+  async function setWindowPosPhysical(x, y) {
+    if (!win || !PhysicalPosition) return;
+    try {
+      await win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  function monitorList() {
+    try {
+      const api = tauri.window;
+      return api && api.availableMonitors ? api.availableMonitors() : Promise.resolve([]);
+    } catch (err) {
+      return Promise.resolve([]);
+    }
+  }
+
+  function monitorRect(mon) {
+    return {
+      x: mon.position.x,
+      y: mon.position.y,
+      w: mon.size.width,
+      h: mon.size.height,
+    };
+  }
+
+  function overlapArea(x, y, w, h, r) {
+    const left = Math.max(x, r.x);
+    const top = Math.max(y, r.y);
+    const right = Math.min(x + w, r.x + r.w);
+    const bottom = Math.min(y + h, r.y + r.h);
+    return Math.max(0, right - left) * Math.max(0, bottom - top);
+  }
+
+  function pickMonitor(pos, size, monitors) {
+    let best = null;
+    let bestArea = 0;
+    for (const mon of monitors) {
+      const r = monitorRect(mon);
+      const area = overlapArea(pos.x, pos.y, size.width, size.height, r);
+      if (area > bestArea) {
+        bestArea = area;
+        best = r;
+      }
+    }
+    return best;
+  }
+
+  function visibleRatio(pos, size, monitors) {
+    const area = size.width * size.height;
+    if (!area) return 1;
+    let visible = 0;
+    for (const mon of monitors) {
+      visible += overlapArea(pos.x, pos.y, size.width, size.height, monitorRect(mon));
+    }
+    return Math.min(1, visible / area);
+  }
+
+  async function enterEdgeHide(edge, r, pos, size) {
+    if (edgeHide || !win) return;
+    const sliver = EDGE_SLIVER;
+    const shown = { x: pos.x, y: pos.y };
+    if (edge === "top" || edge === "bottom") {
+      shown.x = clamp(pos.x, r.x, Math.max(r.x, r.x + r.w - size.width));
+    }
+    if (edge === "left" || edge === "right") {
+      shown.y = clamp(pos.y, r.y, Math.max(r.y, r.y + r.h - size.height));
+    }
+    if (edge === "left") shown.x = r.x;
+    if (edge === "right") shown.x = r.x + r.w - size.width;
+    if (edge === "top") shown.y = r.y;
+    if (edge === "bottom") shown.y = r.y + r.h - size.height;
+
+    const hidden = { x: shown.x, y: shown.y };
+    if (edge === "left") hidden.x = r.x - size.width + sliver;
+    if (edge === "right") hidden.x = r.x + r.w - sliver;
+    if (edge === "top") hidden.y = r.y - size.height + sliver;
+    if (edge === "bottom") hidden.y = r.y + r.h - sliver;
+
+    edgeHide = { edge, rect: r, size, hidden, shown, revealed: false };
+    topDwellSince = 0;
+    clearTimeout(topDwellTimer);
+    clearTimeout(edgeRevealTimer);
+    edgeRevealTimer = null;
+    clearTimeout(edgeLeaveTimer);
+    hideCalInfo();
+    closeDuePopover();
+    closeCalAdd();
+    startEdgePoll();
+    await setWindowPosPhysical(hidden.x, hidden.y);
+  }
+
+  async function revealEdgeHide() {
+    if (!edgeHide || edgeHide.revealed) return;
+    edgeHide.revealed = true;
+    clearTimeout(edgeRevealTimer);
+    edgeRevealTimer = null;
+    await setWindowPosPhysical(edgeHide.shown.x, edgeHide.shown.y);
+  }
+
+  async function concealEdgeHide() {
+    if (!edgeHide || !edgeHide.revealed) return;
+    edgeHide.revealed = false;
+    await setWindowPosPhysical(edgeHide.hidden.x, edgeHide.hidden.y);
+  }
+
+  function clearEdgeHide() {
+    edgeHide = null;
+    clearTimeout(edgeRevealTimer);
+    edgeRevealTimer = null;
+    clearTimeout(edgeLeaveTimer);
+    edgeLeaveTimer = null;
+    clearInterval(edgePollTimer);
+    edgePollTimer = null;
+  }
+
+  function startEdgePoll() {
+    clearInterval(edgePollTimer);
+    edgePollTimer = setInterval(pollEdgeHover, 200);
+  }
+
+  async function pollEdgeHover() {
+    if (!edgeHide || edgeHide.revealed || !tauri.window?.cursorPosition) return;
+    try {
+      const cursor = await tauri.window.cursorPosition();
+      const { hidden, size } = edgeHide;
+      const inside =
+        cursor.x >= hidden.x &&
+        cursor.x <= hidden.x + size.width &&
+        cursor.y >= hidden.y &&
+        cursor.y <= hidden.y + size.height;
+      if (inside) {
+        if (!edgeRevealTimer) {
+          edgeRevealTimer = setTimeout(revealEdgeHide, EDGE_REVEAL_MS);
+        }
+      } else if (edgeRevealTimer) {
+        clearTimeout(edgeRevealTimer);
+        edgeRevealTimer = null;
+      }
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  async function handleShownDrag() {
+    if (!edgeHide || !edgeHide.revealed) return;
+    let pos;
+    let size;
+    try {
+      pos = await win.outerPosition();
+      size = await win.outerSize();
+    } catch (err) {
+      return;
+    }
+    const r = edgeHide.rect;
+    let dist = 0;
+    if (edgeHide.edge === "left") dist = pos.x - r.x;
+    else if (edgeHide.edge === "right") dist = r.x + r.w - (pos.x + size.width);
+    else if (edgeHide.edge === "top") dist = pos.y - r.y;
+    else dist = r.y + r.h - (pos.y + size.height);
+
+    if (dist > 40) {
+      clearEdgeHide();
+      return;
+    }
+    // 沿边缘拖动时同步更新沿边位置
+    edgeHide.shown = { x: pos.x, y: pos.y };
+    if (edgeHide.edge === "top" || edgeHide.edge === "bottom") {
+      edgeHide.hidden.x = pos.x;
+    } else {
+      edgeHide.hidden.y = pos.y;
+    }
+  }
+
+  async function handleMoveSettled() {
+    if (!win) return;
+    if (edgeHide) {
+      await handleShownDrag();
+      return;
+    }
+    let pos;
+    let size;
+    let monitors;
+    try {
+      pos = await win.outerPosition();
+      size = await win.outerSize();
+      monitors = await monitorList();
+    } catch (err) {
+      return;
+    }
+    const r = pickMonitor(pos, size, monitors);
+    if (!r) {
+      await snapWindowToEdges();
+      return;
+    }
+
+    // 拖到上边缘并保持 2 秒：向上隐藏
+    if (pointerDown && pos.y <= r.y + 8) {
+      if (!topDwellSince) {
+        topDwellSince = Date.now();
+        clearTimeout(topDwellTimer);
+        topDwellTimer = setTimeout(async () => {
+          if (!pointerDown || edgeHide) return;
+          try {
+            const p = await win.outerPosition();
+            const s = await win.outerSize();
+            const rr = pickMonitor(p, s, await monitorList());
+            if (rr && p.y <= rr.y + 8) await enterEdgeHide("top", rr, p, s);
+          } catch (err) {
+            /* ignore */
+          }
+        }, TOP_DWELL_MS);
+      }
+      return;
+    }
+    topDwellSince = 0;
+    clearTimeout(topDwellTimer);
+
+    // 超过 1/3 移出所有显示器：向最近的侧边 / 底边隐藏
+    if (visibleRatio(pos, size, monitors) < 2 / 3) {
+      const over = {
+        left: r.x - pos.x,
+        right: pos.x + size.width - (r.x + r.w),
+        bottom: pos.y + size.height - (r.y + r.h),
+      };
+      let edge = "";
+      let max = 0;
+      for (const key of ["left", "right", "bottom"]) {
+        if (over[key] > max) {
+          max = over[key];
+          edge = key;
+        }
+      }
+      if (edge) {
+        await enterEdgeHide(edge, r, pos, size);
+        return;
+      }
+    }
+    await snapWindowToEdges();
   }
 
   async function restorePosition() {
@@ -2425,16 +2682,40 @@
 
   // 全局：点击外部关闭弹窗、Esc、位置保存与退出前保存
   function bindWindowEvents() {
-    // 拖动停止后贴近屏幕边缘自动吸附
+    // 拖动停止后处理靠边吸附 / 边缘隐藏
     if (win && typeof win.onMoved === "function") {
       win.onMoved(() => {
-        clearTimeout(snapTimer);
-        snapTimer = setTimeout(snapWindowToEdges, 160);
+        clearTimeout(moveSettleTimer);
+        moveSettleTimer = setTimeout(handleMoveSettled, 180);
       });
     }
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.button === 0) pointerDown = true;
+      },
+      true
+    );
     window.addEventListener("mouseup", () => {
-      clearTimeout(snapTimer);
-      snapTimer = setTimeout(snapWindowToEdges, 80);
+      pointerDown = false;
+      topDwellSince = 0;
+      clearTimeout(topDwellTimer);
+      clearTimeout(moveSettleTimer);
+      moveSettleTimer = setTimeout(handleMoveSettled, 80);
+    });
+
+    // 隐藏状态下悬停 1.2 秒显示；显示后移开鼠标再收起
+    els.app.addEventListener("mouseenter", () => {
+      if (!edgeHide) return;
+      clearTimeout(edgeLeaveTimer);
+      edgeLeaveTimer = null;
+    });
+    els.app.addEventListener("mouseleave", () => {
+      if (!edgeHide || !edgeHide.revealed) return;
+      clearTimeout(edgeLeaveTimer);
+      edgeLeaveTimer = setTimeout(() => {
+        if (edgeHide && edgeHide.revealed && !pointerDown) concealEdgeHide();
+      }, EDGE_LEAVE_MS);
     });
     document.addEventListener(
       "pointerdown",
