@@ -189,9 +189,11 @@
   const SETTINGS_W = 404;
   const SETTINGS_H = 620;
   const SNAP_DIST = 20;
-  const EDGE_SLIVER = 28;
+  const EDGE_SLIVER = 48;
   const EDGE_REVEAL_MS = 1200;
   const EDGE_LEAVE_MS = 700;
+  const EDGE_HIDE_ANIM_MS = 320;
+  const EDGE_SHOW_ANIM_MS = 260;
   const TOP_DWELL_MS = 2000;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
@@ -235,6 +237,7 @@
   let dragTimer = null;
   let moveSettleTimer = null;
   let edgeHide = null;
+  let edgeAnimToken = 0;
   let edgeRevealTimer = null;
   let edgeLeaveTimer = null;
   let edgePollTimer = null;
@@ -708,6 +711,39 @@
     }
   }
 
+  /** 平滑移动窗口，让滑入滑出肉眼可见 */
+  async function animateWindowTo(x, y, duration) {
+    if (!win || !PhysicalPosition) return;
+    const token = ++edgeAnimToken;
+    let from;
+    try {
+      from = await win.outerPosition();
+    } catch (err) {
+      return;
+    }
+    if (token !== edgeAnimToken) return;
+    const dx = x - from.x;
+    const dy = y - from.y;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    const startedAt = performance.now();
+    await new Promise((resolve) => {
+      const step = (now) => {
+        if (token !== edgeAnimToken) {
+          resolve();
+          return;
+        }
+        const t = Math.min(1, (now - startedAt) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        win
+          .setPosition(new PhysicalPosition(Math.round(from.x + dx * eased), Math.round(from.y + dy * eased)))
+          .catch(() => {});
+        if (t < 1) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
   function monitorList() {
     try {
       const api = tauri.window;
@@ -789,7 +825,7 @@
     closeDuePopover();
     closeCalAdd();
     startEdgePoll();
-    await setWindowPosPhysical(hidden.x, hidden.y);
+    await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS);
   }
 
   async function revealEdgeHide() {
@@ -797,13 +833,13 @@
     edgeHide.revealed = true;
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
-    await setWindowPosPhysical(edgeHide.shown.x, edgeHide.shown.y);
+    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
   }
 
   async function concealEdgeHide() {
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
-    await setWindowPosPhysical(edgeHide.hidden.x, edgeHide.hidden.y);
+    await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
   }
 
   function clearEdgeHide() {
@@ -2688,6 +2724,16 @@
       clearTimeout(moveSettleTimer);
       moveSettleTimer = setTimeout(handleMoveSettled, 80);
     });
+    document.addEventListener(
+      "pointerup",
+      () => {
+        pointerDown = false;
+      },
+      true
+    );
+    window.addEventListener("blur", () => {
+      pointerDown = false;
+    });
 
     // 隐藏状态下悬停 1.2 秒显示；显示后移开鼠标再收起
     els.app.addEventListener("mouseenter", () => {
@@ -2699,7 +2745,7 @@
       if (!edgeHide || !edgeHide.revealed) return;
       clearTimeout(edgeLeaveTimer);
       edgeLeaveTimer = setTimeout(() => {
-        if (edgeHide && edgeHide.revealed && !pointerDown) concealEdgeHide();
+        if (edgeHide && edgeHide.revealed) concealEdgeHide();
       }, EDGE_LEAVE_MS);
     });
     document.addEventListener(
