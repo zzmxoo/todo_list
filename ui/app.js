@@ -189,11 +189,13 @@
   const SETTINGS_W = 404;
   const SETTINGS_H = 620;
   const SNAP_DIST = 20;
-  const EDGE_SLIVER = 48;
+  // 上下边缘留 36px（原 48 减 1/4），左右边缘留 24px（原 48 的一半）
+  const EDGE_SLIVER_VERT = 36;
+  const EDGE_SLIVER_SIDE = 24;
   const EDGE_REVEAL_MS = 1200;
   const EDGE_LEAVE_MS = 700;
-  const EDGE_HIDE_ANIM_MS = 320;
-  const EDGE_SHOW_ANIM_MS = 260;
+  const EDGE_HIDE_ANIM_MS = 420;
+  const EDGE_SHOW_ANIM_MS = 340;
   const TOP_DWELL_MS = 2000;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
@@ -796,7 +798,7 @@
 
   async function enterEdgeHide(edge, r, pos, size) {
     if (edgeHide || !win) return;
-    const sliver = EDGE_SLIVER;
+    const sliver = edge === "top" || edge === "bottom" ? EDGE_SLIVER_VERT : EDGE_SLIVER_SIDE;
     const shown = { x: pos.x, y: pos.y };
     if (edge === "top" || edge === "bottom") {
       shown.x = clamp(pos.x, r.x, Math.max(r.x, r.x + r.w - size.width));
