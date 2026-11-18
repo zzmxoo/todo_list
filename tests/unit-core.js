@@ -145,6 +145,29 @@
     eq(scrolled.above[2], 2);
   });
 
+  test('badgePlacements 统一贴在行尾并统计上下条数', () => {
+    const segs = [0, 1, 2, 3, 4].map(() => ({ col: 1, span: 2 }));
+    const top = core.badgePlacements(core.layoutBands(segs, 3, 0).placed, 3, 0);
+    eq(top.length, 1);
+    eq(top[0].kind, 'below');
+    eq(top[0].col, 6);
+    eq(top[0].count, 2);
+
+    const scrolled = core.badgePlacements(core.layoutBands(segs, 3, 2).placed, 3, 2);
+    eq(scrolled.length, 1);
+    eq(scrolled[0].kind, 'above');
+    eq(scrolled[0].count, 2);
+
+    const both = core.badgePlacements(
+      core.layoutBands([0, 1, 2, 3, 4, 5].map(() => ({ col: 1, span: 2 })), 2, 2).placed,
+      2,
+      2
+    );
+    eq(both.length, 2);
+    eq(both[0].col, 6);
+    eq(both[1].col, 6);
+  });
+
   const passed = results.filter((r) => r.ok).length;
   return JSON.stringify({ passed: passed, failed: results.length - passed, results: results });
 })()

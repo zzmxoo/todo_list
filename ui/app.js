@@ -69,6 +69,7 @@
     withinUpcoming,
     clipSegment,
     layoutBands,
+    badgePlacements,
   } = window.TodoCore;
 
   // 节气弹框背景：深色渐变 + 节气名水印，按季节配一组颜色
@@ -1874,8 +1875,6 @@
     week.dataset.maxOffset = String(bands.maxOffset);
     if (laneOffset) weekScroll.set(weekKey, laneOffset);
     else weekScroll.delete(weekKey);
-    const aboveCount = bands.above;
-    const belowCount = bands.below;
 
     for (const seg of bands.placed) {
       if (seg.lane < laneOffset || seg.lane >= laneOffset + MAX_BARS) continue;
@@ -1900,7 +1899,7 @@
       overlay.appendChild(bar);
     }
 
-    // 上面 / 下面还有几条：贴在每一个日期格对应行末
+    // 上面 / 下面还有几条：只标在首行 / 末行色条的末尾日期格，避免每个格子重复
     const addBadge = (col, top, text, kind) => {
       const badge = document.createElement("span");
       badge.className = `cal-bar-badge ${kind}`;
@@ -1909,9 +1908,10 @@
       badge.textContent = text;
       overlay.appendChild(badge);
     };
-    for (let c = 0; c < 7; c += 1) {
-      if (aboveCount[c]) addBadge(c, 18, `+${aboveCount[c]}`, "above");
-      if (belowCount[c]) addBadge(c, 18 + (MAX_BARS - 1) * 11, `+${belowCount[c]}`, "below");
+    const top = 18;
+    const bottom = 18 + (MAX_BARS - 1) * 11;
+    for (const badge of badgePlacements(bands.placed, MAX_BARS, laneOffset)) {
+      addBadge(badge.col, badge.kind === "above" ? top : bottom, `+${badge.count}`, badge.kind);
     }
 
     const old = week.querySelector(".cal-bars");

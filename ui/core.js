@@ -89,6 +89,20 @@
     return { placed, laneCount: laneEnds.length, offset: start, maxOffset, above, below };
   }
 
+  // +n 徽标：统一贴在行尾（周日）格，分别表示上方 / 下方还有几条
+  function badgePlacements(placed, maxBars, offset) {
+    let above = 0;
+    let below = 0;
+    for (const seg of placed) {
+      if (seg.lane < offset) above += 1;
+      else if (seg.lane >= offset + maxBars) below += 1;
+    }
+    const out = [];
+    if (above) out.push({ col: 6, count: above, kind: "above" });
+    if (below) out.push({ col: 6, count: below, kind: "below" });
+    return out;
+  }
+
   return {
     SOLAR_TERMS,
     pad2,
@@ -98,5 +112,6 @@
     withinUpcoming,
     clipSegment,
     layoutBands,
+    badgePlacements,
   };
 });
