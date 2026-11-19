@@ -223,6 +223,8 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+    // 通知前端：如果当前是边缘收起状态，立即弹出并启动自动收起计时
+    let _ = app.emit("tray-show", ());
 }
 
 fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {

@@ -196,6 +196,7 @@
   const EDGE_LEAVE_MS = 700;
   const EDGE_HIDE_ANIM_MS = 378;
   const EDGE_SHOW_ANIM_MS = 378;
+  const TRAY_HIDE_MS = 5000;
   const TOP_DWELL_MS = 2000;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
@@ -244,6 +245,7 @@
   let animStartListening = false;
   let edgeAnimating = null;
   let edgeClickGuardUntil = 0;
+  let trayHideTimer = null;
   let edgeRevealTimer = null;
   let edgeLeaveTimer = null;
   let edgePollTimer = null;
@@ -934,6 +936,8 @@
   async function concealEdgeHide() {
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
+    clearTimeout(trayHideTimer);
+    trayHideTimer = null;
     const edge = edgeHide.edge;
     await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS, () =>
       runEdgeContent(edge, true, EDGE_HIDE_ANIM_MS)
@@ -946,6 +950,8 @@
     edgeHide = null;
     edgeAnimToken += 1;
     edgeAnimating = null;
+    clearTimeout(trayHideTimer);
+    trayHideTimer = null;
     invoke("cancel_window_anim").catch(() => {});
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
@@ -960,6 +966,24 @@
   function startEdgePoll() {
     clearInterval(edgePollTimer);
     edgePollTimer = setInterval(pollEdgeHover, 200);
+  }
+
+  // 托盘图标唤出：如果处于边缘收起状态，弹出后 5 秒自动收回（鼠标在窗口上则顺延）
+  function handleTrayShow() {
+    if (!edgeHide) return;
+    revealEdgeHide();
+    clearTimeout(trayHideTimer);
+    trayHideTimer = setTimeout(trayHideTick, TRAY_HIDE_MS);
+  }
+
+  function trayHideTick() {
+    trayHideTimer = null;
+    if (!edgeHide || !edgeHide.revealed) return;
+    if (els.app && els.app.matches(":hover")) {
+      trayHideTimer = setTimeout(trayHideTick, 1000);
+      return;
+    }
+    concealEdgeHide();
   }
 
   async function pollEdgeHover() {
@@ -2855,6 +2879,9 @@
 
   // 全局：点击外部关闭弹窗、Esc、位置保存与退出前保存
   function bindWindowEvents() {
+    if (tauri.event) {
+      tauri.event.listen("tray-show", handleTrayShow).catch(() => {});
+    }
     // 拖动停止后处理靠边吸附 / 边缘隐藏
     if (win && typeof win.onMoved === "function") {
       win.onMoved(() => {
