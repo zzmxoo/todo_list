@@ -242,6 +242,7 @@
   let pendingAnimStart = null;
   let animStartListening = false;
   let edgeAnimating = null;
+  let edgeClickGuardUntil = 0;
   let edgeRevealTimer = null;
   let edgeLeaveTimer = null;
   let edgePollTimer = null;
@@ -2866,7 +2867,7 @@
       pointerDown = false;
     });
 
-    // 隐藏状态下悬停 1.2 秒显示；显示后移开鼠标再收起
+    // 隐藏状态下悬停 0.8 秒显示；显示后移开鼠标再收起
     els.app.addEventListener("mouseenter", () => {
       if (!edgeHide) return;
       clearTimeout(edgeLeaveTimer);
@@ -2879,6 +2880,29 @@
         if (edgeHide && edgeHide.revealed) concealEdgeHide();
       }, EDGE_LEAVE_MS);
     });
+
+    // 隐藏状态下左键单击 / 双击窄边：不再等待，立即弹出
+    els.app.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!edgeHide || edgeHide.revealed || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        clearTimeout(edgeRevealTimer);
+        edgeRevealTimer = null;
+        edgeClickGuardUntil = Date.now() + 700;
+        revealEdgeHide();
+      },
+      true
+    );
+    const swallowEdgeClick = (event) => {
+      if (Date.now() < edgeClickGuardUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    els.app.addEventListener("click", swallowEdgeClick, true);
+    els.app.addEventListener("dblclick", swallowEdgeClick, true);
     document.addEventListener(
       "pointerdown",
       (event) => {

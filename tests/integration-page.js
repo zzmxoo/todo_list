@@ -397,6 +397,29 @@
     return 'ok';
   });
 
+  await t('点击窄边立即弹出', async () => {
+    const w = window.__TAURI__.window.getCurrentWindow();
+    const P = window.__TAURI__.dpi.PhysicalPosition;
+    const orig = await w.outerPosition();
+    const size = await w.outerSize();
+    await w.setPosition(new P(-Math.round(size.width / 2), 260));
+    await sleep(1200);
+    const hidden = await w.outerPosition();
+    ok(hidden.x < 0, 'hidden');
+    $('#app').dispatchEvent(
+      new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true })
+    );
+    await sleep(220);
+    const pos = await w.outerPosition();
+    ok(pos.x > hidden.x + 40, 'immediate reveal: ' + pos.x);
+    await sleep(500);
+    await w.setPosition(new P(200, 200));
+    await sleep(800);
+    await w.setPosition(new P(orig.x, orig.y));
+    await sleep(400);
+    return 'ok';
+  });
+
   await t('边缘收起 / 悬停唤出 / 移开收起 / 拖动退出', async () => {
     const w = window.__TAURI__.window.getCurrentWindow();
     const P = window.__TAURI__.dpi.PhysicalPosition;
@@ -416,7 +439,7 @@
     });
     await sleep(450);
     window.__cur = { x: 8, y: 300 };
-    await sleep(1100);
+    await sleep(1450);
     const shown = await w.outerPosition();
     ok(shown.x > hidden.x + 100, 'revealed: ' + shown.x);
     await sleep(450);
