@@ -922,7 +922,7 @@
   }
 
   async function handleMoveSettled() {
-    if (!win) return;
+    if (!win || settingsOpen) return;
     if (edgeHide) {
       let pos;
       let size;
@@ -2131,6 +2131,8 @@
   async function openSettings() {
     if (settingsOpen) return;
     hideCalInfo();
+    // 打开设置前退出边缘隐藏，避免隐藏状态阻止布局刷新
+    if (edgeHide) clearEdgeHide();
     settingsOpen = true;
     syncSettingsUi();
     const rect = await getWindowRect();
