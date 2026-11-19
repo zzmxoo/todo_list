@@ -191,7 +191,7 @@
   const SNAP_DIST = 20;
   // 窄边厚度：原 48 减小 1/4
   const EDGE_SLIVER = 36;
-  const EDGE_REVEAL_MS = 1200;
+  const EDGE_REVEAL_MS = 800;
   const EDGE_LEAVE_MS = 700;
   const EDGE_HIDE_ANIM_MS = 420;
   const EDGE_SHOW_ANIM_MS = 340;
