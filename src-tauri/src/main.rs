@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 
 #[cfg(windows)]
@@ -214,6 +216,67 @@ fn set_autostart(enabled: bool) -> Result<bool, String> {
     }
 }
 
+const TRAY_ID: &str = "main-tray";
+
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let show = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or("missing default window icon")?;
+    TrayIconBuilder::with_id(TRAY_ID)
+        .icon(icon)
+        .tooltip("桌面待办")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    // 默认不占任务栏，托盘图标先隐藏，由设置决定是否显示
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_visible(false);
+    }
+    Ok(())
+}
+
+/// 隐藏任务栏按钮，并把托盘图标放进系统托盘的隐藏区域。
+#[tauri::command]
+fn set_taskbar_hidden(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    enabled: bool,
+) -> Result<(), String> {
+    window
+        .set_skip_taskbar(enabled)
+        .map_err(|e| e.to_string())?;
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_visible(enabled).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn main() {
     // 提高系统定时器精度到 1ms，保证 Rust 侧窗口动画的逐帧间隔均匀
     #[cfg(windows)]
@@ -221,6 +284,10 @@ fn main() {
         timeBeginPeriod(1);
     }
     tauri::Builder::default()
+        .setup(|app| {
+            let _ = build_tray(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_state,
@@ -229,6 +296,7 @@ fn main() {
             fetch_json,
             animate_window,
             cancel_window_anim,
+            set_taskbar_hidden,
             get_autostart,
             set_autostart
         ])

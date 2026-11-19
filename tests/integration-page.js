@@ -130,8 +130,9 @@
     eq(labels[0], '极简模式');
     eq(labels[1], '日历模式');
     eq(labels[2], '窗口置顶');
-    eq(labels[3], '允许开机启动');
-    ok(labels[4].includes('导出'), 'export label');
+    eq(labels[3], '不在任务栏显示');
+    eq(labels[4], '允许开机启动');
+    ok(labels[5].includes('导出'), 'export label');
     const tabs = $$('.set-tab');
     click(tabs[1]);
     await sleep(100);

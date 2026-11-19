@@ -15,6 +15,7 @@
     city: "北京",
     weather_api: "",
     autostart: false,
+    hide_taskbar: false,
     latitude: null,
     longitude: null,
     weather_open: false,
@@ -437,6 +438,7 @@
     els.calendarSwitch = document.getElementById("calendarSwitch");
     els.exportBtn = document.getElementById("exportBtn");
     els.autostartSwitch = document.getElementById("autostartSwitch");
+    els.taskbarSwitch = document.getElementById("taskbarSwitch");
     els.minimalSwitch = document.getElementById("minimalSwitch");
     els.topSwitch = document.getElementById("topSwitch");
     els.cityInput = document.getElementById("cityInput");
@@ -524,6 +526,7 @@
         setSwitch(els.autostartSwitch, !!on);
       })
       .catch(() => {});
+    invoke("set_taskbar_hidden", { enabled: !!state.settings.hide_taskbar }).catch(() => {});
     if (
       state.settings.city === "当前位置" &&
       Number.isFinite(Number(state.settings.latitude)) &&
@@ -549,6 +552,7 @@
     state.settings.weather_api =
       typeof state.settings.weather_api === "string" ? state.settings.weather_api.trim() : "";
     state.settings.autostart = !!state.settings.autostart;
+    state.settings.hide_taskbar = !!state.settings.hide_taskbar;
     state.settings.minimal = !!state.settings.minimal;
     state.settings.calendar = !!state.settings.calendar;
     if (!state.settings.holidays || typeof state.settings.holidays !== "object") {
@@ -1201,6 +1205,7 @@
     els.topSwitch.setAttribute("aria-checked", String(!!s.always_on_top));
     setSwitch(els.minimalSwitch, !!s.minimal);
     setSwitch(els.autostartSwitch, !!s.autostart);
+    setSwitch(els.taskbarSwitch, !!s.hide_taskbar);
     const color = normalizeHex(s.bg_color, DEFAULT_SETTINGS.bg_color);
     if (document.activeElement !== els.bgColor) els.bgColor.value = color;
     els.colorRow.querySelectorAll(".swatch").forEach((btn) => {
@@ -2788,6 +2793,19 @@
       } catch (err) {
         console.warn("autostart failed", err);
         setSwitch(els.autostartSwitch, state.settings.autostart);
+      }
+    });
+
+    els.taskbarSwitch.addEventListener("click", async () => {
+      const next = !state.settings.hide_taskbar;
+      try {
+        await invoke("set_taskbar_hidden", { enabled: next });
+        state.settings.hide_taskbar = next;
+        setSwitch(els.taskbarSwitch, next);
+        save();
+      } catch (err) {
+        console.warn("taskbar toggle failed", err);
+        setSwitch(els.taskbarSwitch, state.settings.hide_taskbar);
       }
     });
 
