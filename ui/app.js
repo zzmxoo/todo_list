@@ -239,6 +239,8 @@
   let moveSettleTimer = null;
   let edgeHide = null;
   let edgeAnimToken = 0;
+  let pendingAnimStart = null;
+  let animStartListening = false;
   let edgeRevealTimer = null;
   let edgeLeaveTimer = null;
   let edgePollTimer = null;
@@ -713,19 +715,49 @@
     }
   }
 
-  /** 窗口位移交给 Rust 逐帧执行，避免每帧 IPC 在系统繁忙时抖动 */
-  async function animateWindowTo(x, y, duration) {
+  /** 窗口位移交给 Rust 逐帧执行；Rust 开始时发事件，前端据此同步启动内容动画 */
+  async function animateWindowTo(x, y, duration, onStart) {
     if (!win) return;
-    edgeAnimToken += 1;
-    const durationMs = Math.max(120, Math.round(duration));
+    ensureAnimStartListener();
+    const id = ++edgeAnimToken;
+    pendingAnimStart = { id, onStart };
+    const fireStart = () => {
+      if (pendingAnimStart && pendingAnimStart.id === id) {
+        const cb = pendingAnimStart.onStart;
+        pendingAnimStart = null;
+        if (cb) cb();
+      }
+    };
+    const fallback = setTimeout(fireStart, 90);
     try {
       await invoke("animate_window", {
         x: Math.round(x),
         y: Math.round(y),
-        durationMs,
+        durationMs: Math.max(120, Math.round(duration)),
+        id,
       });
     } catch (err) {
+      fireStart();
       await setWindowPosPhysical(x, y);
+    } finally {
+      clearTimeout(fallback);
+    }
+  }
+
+  function ensureAnimStartListener() {
+    if (animStartListening || !tauri.event) return;
+    animStartListening = true;
+    try {
+      tauri.event.listen("edge-anim-start", (event) => {
+        const id = Number(event.payload);
+        if (pendingAnimStart && pendingAnimStart.id === id) {
+          const cb = pendingAnimStart.onStart;
+          pendingAnimStart = null;
+          if (cb) cb();
+        }
+      });
+    } catch (err) {
+      /* ignore */
     }
   }
 
@@ -736,17 +768,20 @@
     return "0% 50%";
   }
 
-  /** 内容缩放/淡入淡出交给 CSS transition（合成器执行），不受 JS 负载影响 */
-  function animateEdgeContent(edge, hiding, duration) {
+  /** 内容缩放/淡入淡出交给 CSS transition（合成器执行），由 Rust 动画开始事件触发 */
+  function prepareEdgeContent(edge) {
     if (!els.app) return;
-    const ms = Math.max(120, Math.round(duration));
-    els.app.style.transformOrigin = edgeOrigin(edge);
     els.app.style.transition = "none";
-    if (!hiding) {
-      els.app.style.transform = "scale(0.55)";
-      els.app.style.opacity = "0.08";
-    }
-    void els.app.offsetWidth;
+    els.app.style.transformOrigin = edgeOrigin(edge);
+    els.app.style.transform = "scale(0.55)";
+    els.app.style.opacity = "0.08";
+  }
+
+  function runEdgeContent(edge, hiding, duration) {
+    if (!els.app) return;
+    // 略长于窗口位移，避免系统繁忙时窗口晚到、内容已提前放大完导致跳一下
+    const ms = Math.max(120, Math.round(duration * 1.1));
+    els.app.style.transformOrigin = edgeOrigin(edge);
     els.app.style.transition = `transform ${ms}ms cubic-bezier(0.45, 0, 0.55, 1), opacity ${ms}ms cubic-bezier(0.45, 0, 0.55, 1)`;
     els.app.style.transform = hiding ? "scale(0.55)" : "scale(1)";
     els.app.style.opacity = hiding ? "0.08" : "1";
@@ -849,8 +884,9 @@
     closeDuePopover();
     closeCalAdd();
     startEdgePoll();
-    animateEdgeContent(edge, true, EDGE_HIDE_ANIM_MS);
-    await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS);
+    await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS, () =>
+      runEdgeContent(edge, true, EDGE_HIDE_ANIM_MS)
+    );
     showEdgePeek(edge);
     resetEdgeTransform();
   }
@@ -879,9 +915,11 @@
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
     const edge = edgeHide.edge;
+    prepareEdgeContent(edge);
     hideEdgePeek();
-    animateEdgeContent(edge, false, EDGE_SHOW_ANIM_MS);
-    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
+    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS, () =>
+      runEdgeContent(edge, false, EDGE_SHOW_ANIM_MS)
+    );
     resetEdgeTransform();
   }
 
@@ -889,8 +927,9 @@
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
     const edge = edgeHide.edge;
-    animateEdgeContent(edge, true, EDGE_HIDE_ANIM_MS);
-    await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
+    await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS, () =>
+      runEdgeContent(edge, true, EDGE_HIDE_ANIM_MS)
+    );
     showEdgePeek(edge);
     resetEdgeTransform();
   }

@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg(windows)]
 #[link(name = "winmm")]
@@ -120,9 +120,11 @@ async fn animate_window(
     x: f64,
     y: f64,
     duration_ms: u64,
+    id: u64,
 ) -> Result<(), String> {
     let gen = WINDOW_ANIM_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let start = window.outer_position().map_err(|e| e.to_string())?;
+    let _ = window.emit("edge-anim-start", id);
     let sx = start.x as f64;
     let sy = start.y as f64;
     let steps = (duration_ms as f64 / 8.0).round().max(12.0) as u64;
