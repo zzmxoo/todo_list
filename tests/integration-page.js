@@ -372,7 +372,8 @@
     await w.setPosition(new P(-Math.round(size.width / 2), 260));
     await sleep(430);
     const app = $('#app');
-    ok(app.className.includes('edge-converging'), 'converging');
+    const transform = getComputedStyle(app).transform;
+    ok(transform && transform !== 'none', 'scaling: ' + transform);
     ok(!app.className.includes('edge-hidden'), 'content still visible');
     ok(parseFloat(getComputedStyle(app).opacity) < 0.95, 'fading');
     await sleep(900);

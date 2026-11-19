@@ -713,8 +713,8 @@
     }
   }
 
-  /** 平滑移动窗口，让滑入滑出肉眼可见 */
-  async function animateWindowTo(x, y, duration) {
+  /** 平滑移动窗口，逐帧串行；onStep 用于同步内容缩放，避免两套动画节奏不一致 */
+  async function animateWindowTo(x, y, duration, onStep) {
     if (!win || !PhysicalPosition) return;
     const token = ++edgeAnimToken;
     let from;
@@ -727,23 +727,52 @@
     const dx = x - from.x;
     const dy = y - from.y;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-    const startedAt = performance.now();
-    await new Promise((resolve) => {
-      const step = (now) => {
-        if (token !== edgeAnimToken) {
-          resolve();
-          return;
+    const steps = Math.max(10, Math.min(36, Math.round(duration / 16)));
+    let lastX = from.x;
+    let lastY = from.y;
+    for (let i = 1; i <= steps; i += 1) {
+      if (token !== edgeAnimToken) return;
+      const t = i / steps;
+      const eased = 1 - Math.pow(1 - t, 3);
+      const nx = Math.round(from.x + dx * eased);
+      const ny = Math.round(from.y + dy * eased);
+      if (nx !== lastX || ny !== lastY) {
+        try {
+          await win.setPosition(new PhysicalPosition(nx, ny));
+          lastX = nx;
+          lastY = ny;
+        } catch (err) {
+          /* ignore */
         }
-        const t = Math.min(1, (now - startedAt) / duration);
-        const eased = 1 - Math.pow(1 - t, 3);
-        win
-          .setPosition(new PhysicalPosition(Math.round(from.x + dx * eased), Math.round(from.y + dy * eased)))
-          .catch(() => {});
-        if (t < 1) requestAnimationFrame(step);
-        else resolve();
-      };
-      requestAnimationFrame(step);
-    });
+      }
+      if (onStep) onStep(eased);
+      if (i < steps) {
+        await new Promise((resolve) => setTimeout(resolve, duration / steps));
+      }
+    }
+  }
+
+  function edgeOrigin(edge) {
+    if (edge === "top") return "50% 100%";
+    if (edge === "bottom") return "50% 0%";
+    if (edge === "left") return "100% 50%";
+    return "0% 50%";
+  }
+
+  function applyEdgeProgress(edge, progress, hiding) {
+    if (!els.app) return;
+    const scale = hiding ? 1 - 0.45 * progress : 0.55 + 0.45 * progress;
+    const opacity = hiding ? 1 - 0.92 * progress : 0.08 + 0.92 * progress;
+    els.app.style.transformOrigin = edgeOrigin(edge);
+    els.app.style.transform = `scale(${scale.toFixed(4)})`;
+    els.app.style.opacity = opacity.toFixed(3);
+  }
+
+  function resetEdgeTransform() {
+    if (!els.app) return;
+    els.app.style.transform = "";
+    els.app.style.transformOrigin = "";
+    els.app.style.opacity = "";
   }
 
   function monitorList() {
@@ -834,27 +863,12 @@
     hideCalInfo();
     closeDuePopover();
     closeCalAdd();
-    beginEdgeConverge(edge);
     startEdgePoll();
-    await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS);
-    endEdgeConverge();
-    showEdgePeek(edge);
-  }
-
-  function beginEdgeConverge(edge) {
-    if (!els.app) return;
-    els.app.classList.add("edge-converging", `edge-converging-${edge}`);
-  }
-
-  function endEdgeConverge() {
-    if (!els.app) return;
-    els.app.classList.remove(
-      "edge-converging",
-      "edge-converging-top",
-      "edge-converging-bottom",
-      "edge-converging-left",
-      "edge-converging-right"
+    await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS, (progress) =>
+      applyEdgeProgress(edge, progress, true)
     );
+    showEdgePeek(edge);
+    resetEdgeTransform();
   }
 
   function showEdgePeek(edge) {
@@ -880,21 +894,24 @@
     edgeHide.revealed = true;
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
-    endEdgeConverge();
+    const edge = edgeHide.edge;
     hideEdgePeek();
-    els.app.classList.add("edge-appearing");
-    setTimeout(() => els.app.classList.remove("edge-appearing"), 380);
-    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
+    applyEdgeProgress(edge, 0, false);
+    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS, (progress) =>
+      applyEdgeProgress(edge, progress, false)
+    );
+    resetEdgeTransform();
   }
 
   async function concealEdgeHide() {
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
-    els.app.classList.remove("edge-appearing");
-    beginEdgeConverge(edgeHide.edge);
-    await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
-    endEdgeConverge();
-    showEdgePeek(edgeHide.edge);
+    const edge = edgeHide.edge;
+    await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS, (progress) =>
+      applyEdgeProgress(edge, progress, true)
+    );
+    showEdgePeek(edge);
+    resetEdgeTransform();
   }
 
   function clearEdgeHide() {
@@ -906,8 +923,7 @@
     clearInterval(edgePollTimer);
     edgePollTimer = null;
     hideEdgePeek();
-    endEdgeConverge();
-    if (els.app) els.app.classList.remove("edge-appearing");
+    resetEdgeTransform();
   }
 
   function startEdgePoll() {
