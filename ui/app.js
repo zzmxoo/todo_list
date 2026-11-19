@@ -193,8 +193,8 @@
   const EDGE_SLIVER = 36;
   const EDGE_REVEAL_MS = 800;
   const EDGE_LEAVE_MS = 700;
-  const EDGE_HIDE_ANIM_MS = 420;
-  const EDGE_SHOW_ANIM_MS = 420;
+  const EDGE_HIDE_ANIM_MS = 378;
+  const EDGE_SHOW_ANIM_MS = 378;
   const TOP_DWELL_MS = 2000;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
@@ -713,45 +713,19 @@
     }
   }
 
-  /** 平滑移动窗口，逐帧串行；onStep 用于同步内容缩放，避免两套动画节奏不一致 */
-  async function animateWindowTo(x, y, duration, onStep, fromOverride) {
-    if (!win || !PhysicalPosition) return;
-    const token = ++edgeAnimToken;
-    let from = fromOverride;
-    if (!from) {
-      try {
-        from = await win.outerPosition();
-      } catch (err) {
-        return;
-      }
-    }
-    if (token !== edgeAnimToken) return;
-    const dx = x - from.x;
-    const dy = y - from.y;
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-    const steps = Math.max(16, Math.min(40, Math.round(duration / 14)));
-    let lastX = from.x;
-    let lastY = from.y;
-    for (let i = 1; i <= steps; i += 1) {
-      if (token !== edgeAnimToken) return;
-      const t = i / steps;
-      // 平滑起止，避免第一帧跳一大段
-      const eased = t * t * (3 - 2 * t);
-      const nx = Math.round(from.x + dx * eased);
-      const ny = Math.round(from.y + dy * eased);
-      if (nx !== lastX || ny !== lastY) {
-        try {
-          await win.setPosition(new PhysicalPosition(nx, ny));
-          lastX = nx;
-          lastY = ny;
-        } catch (err) {
-          /* ignore */
-        }
-      }
-      if (onStep) onStep(eased);
-      if (i < steps) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      }
+  /** 窗口位移交给 Rust 逐帧执行，避免每帧 IPC 在系统繁忙时抖动 */
+  async function animateWindowTo(x, y, duration) {
+    if (!win) return;
+    edgeAnimToken += 1;
+    const durationMs = Math.max(120, Math.round(duration));
+    try {
+      await invoke("animate_window", {
+        x: Math.round(x),
+        y: Math.round(y),
+        durationMs,
+      });
+    } catch (err) {
+      await setWindowPosPhysical(x, y);
     }
   }
 
@@ -762,17 +736,25 @@
     return "0% 50%";
   }
 
-  function applyEdgeProgress(edge, progress, hiding) {
+  /** 内容缩放/淡入淡出交给 CSS transition（合成器执行），不受 JS 负载影响 */
+  function animateEdgeContent(edge, hiding, duration) {
     if (!els.app) return;
-    const scale = hiding ? 1 - 0.45 * progress : 0.55 + 0.45 * progress;
-    const opacity = hiding ? 1 - 0.92 * progress : 0.08 + 0.92 * progress;
+    const ms = Math.max(120, Math.round(duration));
     els.app.style.transformOrigin = edgeOrigin(edge);
-    els.app.style.transform = `scale(${scale.toFixed(4)})`;
-    els.app.style.opacity = opacity.toFixed(3);
+    els.app.style.transition = "none";
+    if (!hiding) {
+      els.app.style.transform = "scale(0.55)";
+      els.app.style.opacity = "0.08";
+    }
+    void els.app.offsetWidth;
+    els.app.style.transition = `transform ${ms}ms cubic-bezier(0.45, 0, 0.55, 1), opacity ${ms}ms cubic-bezier(0.45, 0, 0.55, 1)`;
+    els.app.style.transform = hiding ? "scale(0.55)" : "scale(1)";
+    els.app.style.opacity = hiding ? "0.08" : "1";
   }
 
   function resetEdgeTransform() {
     if (!els.app) return;
+    els.app.style.transition = "";
     els.app.style.transform = "";
     els.app.style.transformOrigin = "";
     els.app.style.opacity = "";
@@ -867,13 +849,8 @@
     closeDuePopover();
     closeCalAdd();
     startEdgePoll();
-    await animateWindowTo(
-      hidden.x,
-      hidden.y,
-      EDGE_HIDE_ANIM_MS,
-      (progress) => applyEdgeProgress(edge, progress, true),
-      { x: pos.x, y: pos.y }
-    );
+    animateEdgeContent(edge, true, EDGE_HIDE_ANIM_MS);
+    await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS);
     showEdgePeek(edge);
     resetEdgeTransform();
   }
@@ -903,14 +880,8 @@
     edgeRevealTimer = null;
     const edge = edgeHide.edge;
     hideEdgePeek();
-    applyEdgeProgress(edge, 0, false);
-    await animateWindowTo(
-      edgeHide.shown.x,
-      edgeHide.shown.y,
-      EDGE_SHOW_ANIM_MS,
-      (progress) => applyEdgeProgress(edge, progress, false),
-      { x: edgeHide.hidden.x, y: edgeHide.hidden.y }
-    );
+    animateEdgeContent(edge, false, EDGE_SHOW_ANIM_MS);
+    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
     resetEdgeTransform();
   }
 
@@ -918,19 +889,16 @@
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
     const edge = edgeHide.edge;
-    await animateWindowTo(
-      edgeHide.hidden.x,
-      edgeHide.hidden.y,
-      EDGE_HIDE_ANIM_MS,
-      (progress) => applyEdgeProgress(edge, progress, true),
-      { x: edgeHide.shown.x, y: edgeHide.shown.y }
-    );
+    animateEdgeContent(edge, true, EDGE_HIDE_ANIM_MS);
+    await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
     showEdgePeek(edge);
     resetEdgeTransform();
   }
 
   function clearEdgeHide() {
     edgeHide = null;
+    edgeAnimToken += 1;
+    invoke("cancel_window_anim").catch(() => {});
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
     clearTimeout(edgeLeaveTimer);

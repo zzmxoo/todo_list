@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
 
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -104,6 +105,47 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
 const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 const AUTOSTART_NAME: &str = "DesktopTodo";
 
+static WINDOW_ANIM_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// 在 Rust 侧逐帧移动窗口，避免每帧一次 IPC 在系统繁忙时造成抖动。
+#[tauri::command]
+async fn animate_window(
+    window: tauri::Window,
+    x: f64,
+    y: f64,
+    duration_ms: u64,
+) -> Result<(), String> {
+    let gen = WINDOW_ANIM_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let start = window.outer_position().map_err(|e| e.to_string())?;
+    let sx = start.x as f64;
+    let sy = start.y as f64;
+    let steps = (duration_ms as f64 / 8.0).round().max(12.0) as u64;
+    let began = std::time::Instant::now();
+    for i in 1..=steps {
+        if WINDOW_ANIM_GEN.load(Ordering::SeqCst) != gen {
+            return Ok(());
+        }
+        let t = i as f64 / steps as f64;
+        let eased = t * t * (3.0 - 2.0 * t);
+        let nx = (sx + (x - sx) * eased).round() as i32;
+        let ny = (sy + (y - sy) * eased).round() as i32;
+        window
+            .set_position(tauri::PhysicalPosition::new(nx, ny))
+            .map_err(|e| e.to_string())?;
+        let target = std::time::Duration::from_millis((duration_ms as f64 * t) as u64);
+        let elapsed = began.elapsed();
+        if target > elapsed {
+            tokio::time::sleep(target - elapsed).await;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_window_anim() {
+    WINDOW_ANIM_GEN.fetch_add(1, Ordering::SeqCst);
+}
+
 #[tauri::command]
 fn get_autostart() -> Result<bool, String> {
     #[cfg(windows)]
@@ -166,6 +208,8 @@ fn main() {
             pick_image,
             export_text,
             fetch_json,
+            animate_window,
+            cancel_window_anim,
             get_autostart,
             set_autostart
         ])

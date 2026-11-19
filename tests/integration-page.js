@@ -347,6 +347,19 @@
     return line;
   });
 
+  await t('窗口靠边吸附', async () => {
+    const w = window.__TAURI__.window.getCurrentWindow();
+    const P = window.__TAURI__.dpi.PhysicalPosition;
+    const orig = await w.outerPosition();
+    await w.setPosition(new P(12, 12));
+    await sleep(450);
+    const snapped = await w.outerPosition();
+    ok(Math.abs(snapped.x) <= 2 && Math.abs(snapped.y) <= 2, 'snapped: ' + snapped.x + ',' + snapped.y);
+    await w.setPosition(new P(orig.x, orig.y));
+    await sleep(400);
+    return 'ok';
+  });
+
   await t('日历模式收起时只剩一层窄条', async () => {
     await setCalendar(true);
     const w = window.__TAURI__.window.getCurrentWindow();
@@ -407,28 +420,18 @@
     const shown = await w.outerPosition();
     ok(shown.x > hidden.x + 100, 'revealed: ' + shown.x);
     $('#app').dispatchEvent(new MouseEvent('mouseleave'));
-    await sleep(1000);
+    await sleep(1450);
     const again = await w.outerPosition();
     ok(again.x < 0, 'concealed again: ' + again.x);
+    // 把模拟光标移开，避免悬停轮询再次唤出
+    window.__cur = { x: 1200, y: 600 };
+    await sleep(400);
     await w.setPosition(new P(200, 200));
     await sleep(900);
     ok(!$('#app').className.includes('edge-hidden'), 'exit hide');
     ok($('#edgePeek').hidden, 'peek hidden');
     await w.setPosition(new P(orig.x, orig.y));
     await sleep(500);
-    return 'ok';
-  });
-
-  await t('窗口靠边吸附', async () => {
-    const w = window.__TAURI__.window.getCurrentWindow();
-    const P = window.__TAURI__.dpi.PhysicalPosition;
-    const orig = await w.outerPosition();
-    await w.setPosition(new P(12, 12));
-    await sleep(450);
-    const snapped = await w.outerPosition();
-    ok(Math.abs(snapped.x) <= 2 && Math.abs(snapped.y) <= 2, 'snapped: ' + snapped.x + ',' + snapped.y);
-    await w.setPosition(new P(orig.x, orig.y));
-    await sleep(400);
     return 'ok';
   });
 
