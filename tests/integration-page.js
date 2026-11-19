@@ -419,6 +419,9 @@
     await sleep(1100);
     const shown = await w.outerPosition();
     ok(shown.x > hidden.x + 100, 'revealed: ' + shown.x);
+    await sleep(450);
+    const stable = await w.outerPosition();
+    ok(Math.abs(stable.x - shown.x) <= 3, 'no bounce back: ' + stable.x);
     $('#app').dispatchEvent(new MouseEvent('mouseleave'));
     await sleep(1450);
     const again = await w.outerPosition();

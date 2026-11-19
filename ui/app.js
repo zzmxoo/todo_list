@@ -241,6 +241,7 @@
   let edgeAnimToken = 0;
   let pendingAnimStart = null;
   let animStartListening = false;
+  let edgeAnimating = null;
   let edgeRevealTimer = null;
   let edgeLeaveTimer = null;
   let edgePollTimer = null;
@@ -720,6 +721,7 @@
     if (!win) return;
     ensureAnimStartListener();
     const id = ++edgeAnimToken;
+    edgeAnimating = id;
     pendingAnimStart = { id, onStart };
     const fireStart = () => {
       if (pendingAnimStart && pendingAnimStart.id === id) {
@@ -741,6 +743,7 @@
       await setWindowPosPhysical(x, y);
     } finally {
       clearTimeout(fallback);
+      if (edgeAnimating === id) edgeAnimating = null;
     }
   }
 
@@ -937,6 +940,7 @@
   function clearEdgeHide() {
     edgeHide = null;
     edgeAnimToken += 1;
+    edgeAnimating = null;
     invoke("cancel_window_anim").catch(() => {});
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
@@ -982,7 +986,7 @@
   }
 
   async function handleMoveSettled() {
-    if (!win || settingsOpen) return;
+    if (!win || settingsOpen || edgeAnimating) return;
     if (edgeHide) {
       let pos;
       let size;
