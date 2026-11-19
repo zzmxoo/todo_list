@@ -2246,8 +2246,14 @@
     if (state.settings.calendar) state.settings.minimal = false;
     setSwitch(els.calendarSwitch, state.settings.calendar);
     setSwitch(els.minimalSwitch, state.settings.minimal);
-    document.body.classList.toggle("calendar-mode", state.settings.calendar);
-    document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
+    // 设置面板打开时先不改主界面，关闭设置后由 doLayout 一次性应用
+    if (!settingsOpen) {
+      document.body.classList.toggle("calendar-mode", state.settings.calendar);
+      document.body.classList.toggle(
+        "minimal-mode",
+        !state.settings.calendar && state.settings.minimal
+      );
+    }
     await commitTodos({ layout: !settingsOpen });
   }
 
@@ -2749,8 +2755,14 @@
       if (state.settings.minimal) state.settings.calendar = false;
       setSwitch(els.minimalSwitch, state.settings.minimal);
       setSwitch(els.calendarSwitch, state.settings.calendar);
-      document.body.classList.toggle("calendar-mode", state.settings.calendar);
-      document.body.classList.toggle("minimal-mode", !state.settings.calendar && state.settings.minimal);
+      // 设置面板打开时先不改主界面，关闭设置后由 doLayout 一次性应用
+      if (!settingsOpen) {
+        document.body.classList.toggle("calendar-mode", state.settings.calendar);
+        document.body.classList.toggle(
+          "minimal-mode",
+          !state.settings.calendar && state.settings.minimal
+        );
+      }
       commitTodos({ layout: !settingsOpen });
     });
 
