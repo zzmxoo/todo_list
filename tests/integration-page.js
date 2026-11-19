@@ -347,6 +347,23 @@
     return line;
   });
 
+  await t('日历模式收起时只剩一层窄条', async () => {
+    await setCalendar(true);
+    const w = window.__TAURI__.window.getCurrentWindow();
+    const P = window.__TAURI__.dpi.PhysicalPosition;
+    const orig = await w.outerPosition();
+    const size = await w.outerSize();
+    await w.setPosition(new P(-Math.round(size.width / 2), 260));
+    await sleep(1200);
+    ok($('#app').className.includes('edge-hidden'), 'hidden class');
+    eq(getComputedStyle($('#app'), '::before').opacity, '0', 'panel hidden');
+    ok(!$('#edgePeek').hidden, 'peek visible');
+    await w.setPosition(new P(orig.x, orig.y));
+    await sleep(800);
+    await setCalendar(false);
+    return 'ok';
+  });
+
   await t('边缘收起 / 悬停唤出 / 移开收起 / 拖动退出', async () => {
     const w = window.__TAURI__.window.getCurrentWindow();
     const P = window.__TAURI__.dpi.PhysicalPosition;

@@ -74,6 +74,9 @@ body {
 
 #app.edge-hidden > *:not(.edge-peek),
 #app.edge-hidden > .top-row > * { opacity: 0; }
+
+/* 日历模式整页底板是伪元素，同样要隐藏，否则会和窄条叠成两层 */
+#app.edge-hidden::before { opacity: 0; }
 #app.edge-hidden .edge-peek {
   display: block;
   animation: peek-in 380ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
