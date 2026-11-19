@@ -194,7 +194,7 @@
   const EDGE_REVEAL_MS = 800;
   const EDGE_LEAVE_MS = 700;
   const EDGE_HIDE_ANIM_MS = 420;
-  const EDGE_SHOW_ANIM_MS = 340;
+  const EDGE_SHOW_ANIM_MS = 420;
   const TOP_DWELL_MS = 2000;
   // 日历模式是一整页：左列待办，右列月历（宽度与 CSS 中的 300px 列保持一致）
   const CAL_TODO_W = 300;
@@ -714,26 +714,29 @@
   }
 
   /** 平滑移动窗口，逐帧串行；onStep 用于同步内容缩放，避免两套动画节奏不一致 */
-  async function animateWindowTo(x, y, duration, onStep) {
+  async function animateWindowTo(x, y, duration, onStep, fromOverride) {
     if (!win || !PhysicalPosition) return;
     const token = ++edgeAnimToken;
-    let from;
-    try {
-      from = await win.outerPosition();
-    } catch (err) {
-      return;
+    let from = fromOverride;
+    if (!from) {
+      try {
+        from = await win.outerPosition();
+      } catch (err) {
+        return;
+      }
     }
     if (token !== edgeAnimToken) return;
     const dx = x - from.x;
     const dy = y - from.y;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-    const steps = Math.max(10, Math.min(36, Math.round(duration / 16)));
+    const steps = Math.max(16, Math.min(40, Math.round(duration / 14)));
     let lastX = from.x;
     let lastY = from.y;
     for (let i = 1; i <= steps; i += 1) {
       if (token !== edgeAnimToken) return;
       const t = i / steps;
-      const eased = 1 - Math.pow(1 - t, 3);
+      // 平滑起止，避免第一帧跳一大段
+      const eased = t * t * (3 - 2 * t);
       const nx = Math.round(from.x + dx * eased);
       const ny = Math.round(from.y + dy * eased);
       if (nx !== lastX || ny !== lastY) {
@@ -747,7 +750,7 @@
       }
       if (onStep) onStep(eased);
       if (i < steps) {
-        await new Promise((resolve) => setTimeout(resolve, duration / steps));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
       }
     }
   }
@@ -864,8 +867,12 @@
     closeDuePopover();
     closeCalAdd();
     startEdgePoll();
-    await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS, (progress) =>
-      applyEdgeProgress(edge, progress, true)
+    await animateWindowTo(
+      hidden.x,
+      hidden.y,
+      EDGE_HIDE_ANIM_MS,
+      (progress) => applyEdgeProgress(edge, progress, true),
+      { x: pos.x, y: pos.y }
     );
     showEdgePeek(edge);
     resetEdgeTransform();
@@ -897,8 +904,12 @@
     const edge = edgeHide.edge;
     hideEdgePeek();
     applyEdgeProgress(edge, 0, false);
-    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS, (progress) =>
-      applyEdgeProgress(edge, progress, false)
+    await animateWindowTo(
+      edgeHide.shown.x,
+      edgeHide.shown.y,
+      EDGE_SHOW_ANIM_MS,
+      (progress) => applyEdgeProgress(edge, progress, false),
+      { x: edgeHide.hidden.x, y: edgeHide.hidden.y }
     );
     resetEdgeTransform();
   }
@@ -907,8 +918,12 @@
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
     const edge = edgeHide.edge;
-    await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS, (progress) =>
-      applyEdgeProgress(edge, progress, true)
+    await animateWindowTo(
+      edgeHide.hidden.x,
+      edgeHide.hidden.y,
+      EDGE_HIDE_ANIM_MS,
+      (progress) => applyEdgeProgress(edge, progress, true),
+      { x: edgeHide.shown.x, y: edgeHide.shown.y }
     );
     showEdgePeek(edge);
     resetEdgeTransform();
