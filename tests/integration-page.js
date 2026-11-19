@@ -357,10 +357,29 @@
     await sleep(1200);
     ok($('#app').className.includes('edge-hidden'), 'hidden class');
     eq(getComputedStyle($('#app'), '::before').opacity, '0', 'panel hidden');
-    ok(!$('#edgePeek').hidden, 'peek visible');
+    eq(getComputedStyle($('#edgePeek')).display, 'block', 'peek visible');
     await w.setPosition(new P(orig.x, orig.y));
     await sleep(800);
     await setCalendar(false);
+    return 'ok';
+  });
+
+  await t('收起过程连续：先收缩再变窄条', async () => {
+    const w = window.__TAURI__.window.getCurrentWindow();
+    const P = window.__TAURI__.dpi.PhysicalPosition;
+    const orig = await w.outerPosition();
+    const size = await w.outerSize();
+    await w.setPosition(new P(-Math.round(size.width / 2), 260));
+    await sleep(430);
+    const app = $('#app');
+    ok(app.className.includes('edge-converging'), 'converging');
+    ok(!app.className.includes('edge-hidden'), 'content still visible');
+    ok(parseFloat(getComputedStyle(app).opacity) < 0.95, 'fading');
+    await sleep(900);
+    ok(app.className.includes('edge-hidden'), 'hidden after animation');
+    eq(getComputedStyle($('#edgePeek')).display, 'block', 'peek shown');
+    await w.setPosition(new P(orig.x, orig.y));
+    await sleep(700);
     return 'ok';
   });
 
@@ -375,7 +394,7 @@
     ok(hidden.x < 0, 'moved out: ' + hidden.x);
     ok($('#app').className.includes('edge-hidden'), 'hidden class');
     const peek = $('#edgePeek');
-    ok(!peek.hidden && getComputedStyle(peek).display !== 'none', 'peek visible');
+    eq(getComputedStyle(peek).display, 'block', 'peek visible');
     const origWin = window.__TAURI__.window;
     window.__cur = { x: 1200, y: 600 };
     window.__TAURI__.window = Object.assign({}, origWin, {

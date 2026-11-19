@@ -79,7 +79,7 @@ body {
 #app.edge-hidden::before { opacity: 0; }
 #app.edge-hidden .edge-peek {
   display: block;
-  animation: peek-in 380ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: peek-in 200ms ease both;
 }
 
 #app.edge-hidden-top .edge-peek {
@@ -114,14 +114,28 @@ body {
   animation: app-zoom-in 340ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
+/* 收起时主界面收缩成窄条方向的“扇入”动画 */
+#app.edge-converging {
+  animation: edge-converge 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+#app.edge-converging-top { transform-origin: 50% 100%; }
+#app.edge-converging-bottom { transform-origin: 50% 0%; }
+#app.edge-converging-left { transform-origin: 100% 50%; }
+#app.edge-converging-right { transform-origin: 0% 50%; }
+
 @keyframes peek-in {
-  from { transform: scale(0.55); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes app-zoom-in {
-  from { transform: scale(0.9); opacity: 0.7; }
+  from { transform: scale(0.55); opacity: 0.15; }
   to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes edge-converge {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.55); opacity: 0.08; }
 }
 
 .bg-shade {

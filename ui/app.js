@@ -834,9 +834,27 @@
     hideCalInfo();
     closeDuePopover();
     closeCalAdd();
-    showEdgePeek(edge);
+    beginEdgeConverge(edge);
     startEdgePoll();
     await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS);
+    endEdgeConverge();
+    showEdgePeek(edge);
+  }
+
+  function beginEdgeConverge(edge) {
+    if (!els.app) return;
+    els.app.classList.add("edge-converging", `edge-converging-${edge}`);
+  }
+
+  function endEdgeConverge() {
+    if (!els.app) return;
+    els.app.classList.remove(
+      "edge-converging",
+      "edge-converging-top",
+      "edge-converging-bottom",
+      "edge-converging-left",
+      "edge-converging-right"
+    );
   }
 
   function showEdgePeek(edge) {
@@ -862,6 +880,7 @@
     edgeHide.revealed = true;
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
+    endEdgeConverge();
     hideEdgePeek();
     els.app.classList.add("edge-appearing");
     setTimeout(() => els.app.classList.remove("edge-appearing"), 380);
@@ -872,8 +891,10 @@
     if (!edgeHide || !edgeHide.revealed) return;
     edgeHide.revealed = false;
     els.app.classList.remove("edge-appearing");
-    showEdgePeek(edgeHide.edge);
+    beginEdgeConverge(edgeHide.edge);
     await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS);
+    endEdgeConverge();
+    showEdgePeek(edgeHide.edge);
   }
 
   function clearEdgeHide() {
@@ -885,6 +906,7 @@
     clearInterval(edgePollTimer);
     edgePollTimer = null;
     hideEdgePeek();
+    endEdgeConverge();
     if (els.app) els.app.classList.remove("edge-appearing");
   }
 
