@@ -5,6 +5,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
 
+#[cfg(windows)]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(period: u32) -> u32;
+}
+
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -121,6 +127,8 @@ async fn animate_window(
     let sy = start.y as f64;
     let steps = (duration_ms as f64 / 8.0).round().max(12.0) as u64;
     let began = std::time::Instant::now();
+    let mut last_x = i32::MIN;
+    let mut last_y = i32::MIN;
     for i in 1..=steps {
         if WINDOW_ANIM_GEN.load(Ordering::SeqCst) != gen {
             return Ok(());
@@ -129,9 +137,13 @@ async fn animate_window(
         let eased = t * t * (3.0 - 2.0 * t);
         let nx = (sx + (x - sx) * eased).round() as i32;
         let ny = (sy + (y - sy) * eased).round() as i32;
-        window
-            .set_position(tauri::PhysicalPosition::new(nx, ny))
-            .map_err(|e| e.to_string())?;
+        if nx != last_x || ny != last_y {
+            window
+                .set_position(tauri::PhysicalPosition::new(nx, ny))
+                .map_err(|e| e.to_string())?;
+            last_x = nx;
+            last_y = ny;
+        }
         let target = std::time::Duration::from_millis((duration_ms as f64 * t) as u64);
         let elapsed = began.elapsed();
         if target > elapsed {
@@ -201,6 +213,11 @@ fn set_autostart(enabled: bool) -> Result<bool, String> {
 }
 
 fn main() {
+    // 提高系统定时器精度到 1ms，保证 Rust 侧窗口动画的逐帧间隔均匀
+    #[cfg(windows)]
+    unsafe {
+        timeBeginPeriod(1);
+    }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             load_state,
