@@ -137,6 +137,10 @@
     click(tabs[1]);
     await sleep(100);
     ok($$('.set-page').find((p) => p.classList.contains('active')).dataset.page === 'ui', 'ui tab');
+    click(tabs[3]);
+    await sleep(100);
+    eq($$('.set-page').find((p) => p.classList.contains('active')).dataset.page, 'about');
+    ok(/^\d+\.\d+\.\d+$/.test($('#aboutVersion').textContent), 'about version');
     return 'ok';
   });
 

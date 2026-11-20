@@ -441,6 +441,7 @@
     els.exportBtn = document.getElementById("exportBtn");
     els.autostartSwitch = document.getElementById("autostartSwitch");
     els.taskbarSwitch = document.getElementById("taskbarSwitch");
+    els.aboutVersion = document.getElementById("aboutVersion");
     els.minimalSwitch = document.getElementById("minimalSwitch");
     els.topSwitch = document.getElementById("topSwitch");
     els.cityInput = document.getElementById("cityInput");
@@ -471,6 +472,16 @@
     els.ciQuote = document.getElementById("ciQuote");
     els.ciQuoteText = document.getElementById("ciQuoteText");
     els.ciQuoteFrom = document.getElementById("ciQuoteFrom");
+  }
+
+  async function loadAppVersion() {
+    if (!els.aboutVersion) return;
+    try {
+      const version = await tauri.app?.getVersion?.();
+      if (version) els.aboutVersion.textContent = version;
+    } catch (err) {
+      /* ignore */
+    }
   }
 
   async function boot() {
@@ -522,6 +533,7 @@
 
     setTimeout(() => refreshWeather(), 350);
     holidayCheckToday();
+    loadAppVersion();
     invoke("get_autostart")
       .then((on) => {
         state.settings.autostart = !!on;
