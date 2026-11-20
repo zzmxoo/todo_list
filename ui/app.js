@@ -231,7 +231,6 @@
   let calPress = null;
   let monthCursor = null;
   let weatherBusy = false;
-  let animateNextResize = false;
   const holidayBusy = new Set();
   const holidayFailed = new Set();
   let quoteSeed = [];
@@ -1160,7 +1159,6 @@
       const avail = screenBounds();
       const width = Math.min(MARGIN * 2 + CAL_TODO_W + CAL_W, avail.right - avail.left);
       const height = Math.min(MARGIN * 2 + CAL_H, avail.bottom - avail.top);
-      animateNextResize = false;
       await setWindowSize(width, height);
       await clampWindowPosition();
       return;
@@ -1194,23 +1192,7 @@
 
     const width = MARGIN * 2 + todoW + (state.settings.weather_open ? GAP + WEATHER_W : 0);
     const height = MARGIN * 2 + topH;
-    if (animateNextResize) {
-      animateNextResize = false;
-      try {
-        await invoke("animate_window_size", {
-          startWidth: window.innerWidth,
-          startHeight: window.innerHeight,
-          width,
-          height,
-          scale: window.devicePixelRatio || 1,
-          durationMs: 260,
-        });
-      } catch (err) {
-        await setWindowSize(width, height);
-      }
-    } else {
-      await setWindowSize(width, height);
-    }
+    await setWindowSize(width, height);
     await clampWindowPosition();
   }
 
@@ -1846,7 +1828,6 @@
       if (!state.weather) setWcStatus("正在获取天气…");
     }
 
-    animateNextResize = true;
     await scheduleLayout();
 
     if (show && weatherLeft) {

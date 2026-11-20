@@ -13,12 +13,6 @@ extern "system" {
     fn timeBeginPeriod(period: u32) -> u32;
 }
 
-#[cfg(windows)]
-#[link(name = "user32")]
-extern "system" {
-    fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
-}
-
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -120,7 +114,6 @@ const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run
 const AUTOSTART_NAME: &str = "DesktopTodo";
 
 static WINDOW_ANIM_GEN: AtomicU64 = AtomicU64::new(0);
-static WINDOW_SIZE_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// 在 Rust 侧逐帧移动窗口，避免每帧一次 IPC 在系统繁忙时造成抖动。
 #[tauri::command]
@@ -167,55 +160,6 @@ async fn animate_window(
 #[tauri::command]
 fn cancel_window_anim() {
     WINDOW_ANIM_GEN.fetch_add(1, Ordering::SeqCst);
-}
-
-/// 平滑改变窗口尺寸（天气卡片展开/收起时使用）
-#[tauri::command]
-async fn animate_window_size(
-    window: tauri::Window,
-    start_width: f64,
-    start_height: f64,
-    width: f64,
-    height: f64,
-    scale: f64,
-    duration_ms: u64,
-) -> Result<(), String> {
-    let gen = WINDOW_SIZE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    let scale = if scale > 0.0 { scale } else { 1.0 };
-    let sw = start_width * scale;
-    let sh = start_height * scale;
-    let tw = width * scale;
-    let th = height * scale;
-    if (tw - sw).abs() < 1.0 && (th - sh).abs() < 1.0 {
-        return Ok(());
-    }
-    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
-    let steps = (duration_ms as f64 / 10.0).round().max(10.0) as u64;
-    let began = std::time::Instant::now();
-    for i in 1..=steps {
-        if WINDOW_SIZE_GEN.load(Ordering::SeqCst) != gen {
-            return Ok(());
-        }
-        let t = i as f64 / steps as f64;
-        let eased = t * t * (3.0 - 2.0 * t);
-        let nw = (sw + (tw - sw) * eased).round() as i32;
-        let nh = (sh + (th - sh) * eased).round() as i32;
-        #[cfg(windows)]
-        unsafe {
-            // SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
-            SetWindowPos(hwnd, 0, 0, 0, nw, nh, 0x0002 | 0x0004 | 0x0010);
-        }
-        #[cfg(not(windows))]
-        window
-            .set_size(tauri::PhysicalSize::new(nw as u32, nh as u32))
-            .map_err(|e| e.to_string())?;
-        let target = std::time::Duration::from_millis((duration_ms as f64 * t) as u64);
-        let elapsed = began.elapsed();
-        if target > elapsed {
-            tokio::time::sleep(target - elapsed).await;
-        }
-    }
-    Ok(())
 }
 
 #[tauri::command]
@@ -353,7 +297,6 @@ fn main() {
             export_text,
             fetch_json,
             animate_window,
-            animate_window_size,
             cancel_window_anim,
             set_taskbar_hidden,
             get_autostart,
