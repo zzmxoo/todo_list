@@ -48,9 +48,14 @@
     await sleep(350);
   }
   async function addTodo(text) {
-    click($('#addRow'));
-    await sleep(80);
-    const input = $('.add-input');
+    let input = null;
+    for (let attempt = 0; attempt < 3 && !input; attempt += 1) {
+      click($('#addRow'));
+      await sleep(120);
+      input = $('.add-input');
+      if (!input) await sleep(150);
+      input = $('.add-input');
+    }
     ok(input, 'add input');
     input.value = text;
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

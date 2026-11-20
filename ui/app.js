@@ -1270,8 +1270,8 @@
   }
 
   function renderTodos() {
-    if (addEditing) {
-      addEditing = false;
+    // 正在输入新待办时保留输入框，避免后台刷新把它清空
+    if (!addEditing) {
       els.addRow.classList.remove("editing");
       els.addRow.innerHTML = DEFAULT_BODY();
     }
