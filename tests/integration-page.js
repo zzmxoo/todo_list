@@ -333,9 +333,15 @@
   });
 
   await t('自定义天气链接（uapis.cn）', async () => {
-    const data = await window.__TAURI__.core.invoke('fetch_json', {
-      url: 'https://uapis.cn/api/v1/misc/weather?city=北京&forecast=true',
-    });
+    let data;
+    try {
+      data = await window.__TAURI__.core.invoke('fetch_json', {
+        url: 'https://uapis.cn/api/v1/misc/weather?city=北京&forecast=true',
+      });
+    } catch (err) {
+      if (String(err).includes('429')) return 'skip: rate limited';
+      throw err;
+    }
     ok(data.temperature !== undefined, 'temperature field');
     const norm = window.WeatherAPI.normalizeUapis(data, {});
     ok(norm.daily.length > 0, 'daily normalized');

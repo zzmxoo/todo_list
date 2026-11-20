@@ -163,12 +163,13 @@ fn cancel_window_anim() {
 }
 
 #[tauri::command]
-fn get_autostart() -> Result<bool, String> {
+async fn get_autostart() -> Result<bool, String> {
     #[cfg(windows)]
     {
-        let output = std::process::Command::new("reg")
+        let output = tokio::process::Command::new("reg")
             .args(["query", AUTOSTART_KEY, "/v", AUTOSTART_NAME])
             .output()
+            .await
             .map_err(|e| e.to_string())?;
         return Ok(output.status.success());
     }
@@ -179,13 +180,13 @@ fn get_autostart() -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn set_autostart(enabled: bool) -> Result<bool, String> {
+async fn set_autostart(enabled: bool) -> Result<bool, String> {
     #[cfg(windows)]
     {
         if enabled {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let value = exe.to_string_lossy().to_string();
-            let status = std::process::Command::new("reg")
+            let status = tokio::process::Command::new("reg")
                 .args([
                     "add",
                     AUTOSTART_KEY,
@@ -198,15 +199,17 @@ fn set_autostart(enabled: bool) -> Result<bool, String> {
                     "/f",
                 ])
                 .status()
+                .await
                 .map_err(|e| e.to_string())?;
             if !status.success() {
                 return Err("写入开机启动项失败".into());
             }
         } else {
             // 不存在时 reg delete 会返回非 0，这里视为已关闭
-            let _ = std::process::Command::new("reg")
+            let _ = tokio::process::Command::new("reg")
                 .args(["delete", AUTOSTART_KEY, "/v", AUTOSTART_NAME, "/f"])
-                .status();
+                .status()
+                .await;
         }
         return Ok(enabled);
     }

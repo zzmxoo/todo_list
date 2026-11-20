@@ -2822,6 +2822,9 @@
 
     els.autostartSwitch.addEventListener("click", async () => {
       const next = !state.settings.autostart;
+      // 先给出视觉反馈，写入注册表在后台完成
+      state.settings.autostart = next;
+      setSwitch(els.autostartSwitch, next);
       try {
         const applied = await invoke("set_autostart", { enabled: next });
         state.settings.autostart = !!applied;
@@ -2829,7 +2832,8 @@
         save();
       } catch (err) {
         console.warn("autostart failed", err);
-        setSwitch(els.autostartSwitch, state.settings.autostart);
+        state.settings.autostart = !next;
+        setSwitch(els.autostartSwitch, !next);
       }
     });
 
