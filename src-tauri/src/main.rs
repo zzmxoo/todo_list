@@ -173,22 +173,24 @@ fn cancel_window_anim() {
 #[tauri::command]
 async fn animate_window_size(
     window: tauri::Window,
+    start_width: f64,
+    start_height: f64,
     width: f64,
     height: f64,
+    scale: f64,
     duration_ms: u64,
 ) -> Result<(), String> {
     let gen = WINDOW_SIZE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let start = window.inner_size().map_err(|e| e.to_string())?;
-    let sw = start.width as f64;
-    let sh = start.height as f64;
-    let tw = (width * scale).round() as f64;
-    let th = (height * scale).round() as f64;
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let sw = start_width * scale;
+    let sh = start_height * scale;
+    let tw = width * scale;
+    let th = height * scale;
     if (tw - sw).abs() < 1.0 && (th - sh).abs() < 1.0 {
         return Ok(());
     }
     let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
-    let steps = (duration_ms as f64 / 16.0).round().max(10.0) as u64;
+    let steps = (duration_ms as f64 / 10.0).round().max(10.0) as u64;
     let began = std::time::Instant::now();
     for i in 1..=steps {
         if WINDOW_SIZE_GEN.load(Ordering::SeqCst) != gen {

@@ -1168,14 +1168,14 @@
 
     els.todoList.style.height = "auto";
     els.todoList.style.overflowY = "hidden";
-    await nextFrame();
+    void els.todoList.offsetHeight;
 
     const maxList = 300;
     const contentH = els.todoList.scrollHeight;
     const listH = Math.min(contentH, maxList);
     els.todoList.style.height = `${listH}px`;
     els.todoList.style.overflowY = contentH > maxList + 1 ? "auto" : "hidden";
-    await nextFrame();
+    void els.todoList.offsetHeight;
 
     const todoRect = els.todoCard.getBoundingClientRect();
     const todoW = todoRect.width;
@@ -1186,7 +1186,7 @@
     if (state.settings.weather_open) {
       const prevAlign = els.weatherCard.style.alignSelf;
       els.weatherCard.style.alignSelf = "flex-start";
-      await nextFrame();
+      void els.weatherCard.offsetHeight;
       const wcH = els.weatherCard.getBoundingClientRect().height;
       els.weatherCard.style.alignSelf = prevAlign;
       topH = Math.max(topH, wcH, 300);
@@ -1197,7 +1197,14 @@
     if (animateNextResize) {
       animateNextResize = false;
       try {
-        await invoke("animate_window_size", { width, height, durationMs: 220 });
+        await invoke("animate_window_size", {
+          startWidth: window.innerWidth,
+          startHeight: window.innerHeight,
+          width,
+          height,
+          scale: window.devicePixelRatio || 1,
+          durationMs: 260,
+        });
       } catch (err) {
         await setWindowSize(width, height);
       }
