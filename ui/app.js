@@ -1145,6 +1145,7 @@
     const minimalOn = !calendarOn && !!state.settings.minimal;
     document.body.classList.toggle("calendar-mode", calendarOn);
     document.body.classList.toggle("minimal-mode", minimalOn);
+    document.body.classList.toggle("weather-open", !calendarOn && !!state.settings.weather_open);
     els.calendarCard.hidden = !calendarOn;
     els.weatherCard.hidden = calendarOn || !state.settings.weather_open;
     updateWeatherPillState();

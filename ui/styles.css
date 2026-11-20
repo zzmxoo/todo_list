@@ -545,6 +545,13 @@ body.minimal-mode .todo-row .status {
 
 body.minimal-mode .todo-row .status > span { display: block; }
 
+/* 极简模式打开天气时：待办列表撑满，添加待办贴在卡片底部 */
+body.minimal-mode.weather-open .todo-card .todo-list {
+  flex: 1 1 auto;
+  height: auto !important;
+  overflow-y: auto;
+}
+
 body.minimal-mode .todo-row .text {
   font-size: 12.5px;
   line-height: 18px;
