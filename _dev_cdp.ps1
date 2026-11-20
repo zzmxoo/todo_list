@@ -1,11 +1,13 @@
 param(
   [string]$Expr,
+  [string]$ExprFile = "",
   [string]$Method = "",
   [string]$ParamsJson = "{}",
   [string]$ParamsFile = "",
   [int]$Port = 9222
 )
 $ErrorActionPreference = "Stop"
+if ($ExprFile) { $Expr = Get-Content $ExprFile -Raw -Encoding UTF8 }
 if ($ParamsFile) { $ParamsJson = Get-Content $ParamsFile -Raw -Encoding UTF8 }
 $targets = Invoke-RestMethod "http://127.0.0.1:$Port/json"
 $page = $targets | Where-Object { $_.type -eq "page" } | Select-Object -First 1

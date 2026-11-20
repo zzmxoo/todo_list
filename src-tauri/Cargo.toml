@@ -1,6 +1,6 @@
 [package]
 name = "desktop-todo"
-version = "0.0.3"
+version = "0.0.4"
 description = "桌面待办小工具"
 authors = ["Todo Widget"]
 edition = "2021"

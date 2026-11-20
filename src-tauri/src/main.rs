@@ -113,6 +113,40 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
 const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 const AUTOSTART_NAME: &str = "DesktopTodo";
 
+/// 窗口动画缓动：smoothstep，两端速度为 0。
+fn ease_in_out(t: f64) -> f64 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn lerp(start: f64, end: f64, t: f64) -> f64 {
+    start + (end - start) * t
+}
+
+/// 开机启动写入命令的参数单独构造，便于单元测试。
+fn autostart_add_args(exe: &str) -> Vec<String> {
+    [
+        "add",
+        AUTOSTART_KEY,
+        "/v",
+        AUTOSTART_NAME,
+        "/t",
+        "REG_SZ",
+        "/d",
+        exe,
+        "/f",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect()
+}
+
+fn autostart_delete_args() -> Vec<String> {
+    ["delete", AUTOSTART_KEY, "/v", AUTOSTART_NAME, "/f"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect()
+}
+
 static WINDOW_ANIM_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// 在 Rust 侧逐帧移动窗口，避免每帧一次 IPC 在系统繁忙时造成抖动。
@@ -138,9 +172,9 @@ async fn animate_window(
             return Ok(());
         }
         let t = i as f64 / steps as f64;
-        let eased = t * t * (3.0 - 2.0 * t);
-        let nx = (sx + (x - sx) * eased).round() as i32;
-        let ny = (sy + (y - sy) * eased).round() as i32;
+        let eased = ease_in_out(t);
+        let nx = lerp(sx, x, eased).round() as i32;
+        let ny = lerp(sy, y, eased).round() as i32;
         if nx != last_x || ny != last_y {
             window
                 .set_position(tauri::PhysicalPosition::new(nx, ny))
@@ -187,17 +221,7 @@ async fn set_autostart(enabled: bool) -> Result<bool, String> {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let value = exe.to_string_lossy().to_string();
             let status = tokio::process::Command::new("reg")
-                .args([
-                    "add",
-                    AUTOSTART_KEY,
-                    "/v",
-                    AUTOSTART_NAME,
-                    "/t",
-                    "REG_SZ",
-                    "/d",
-                    &value,
-                    "/f",
-                ])
+                .args(autostart_add_args(&value))
                 .status()
                 .await
                 .map_err(|e| e.to_string())?;
@@ -207,7 +231,7 @@ async fn set_autostart(enabled: bool) -> Result<bool, String> {
         } else {
             // 不存在时 reg delete 会返回非 0，这里视为已关闭
             let _ = tokio::process::Command::new("reg")
-                .args(["delete", AUTOSTART_KEY, "/v", AUTOSTART_NAME, "/f"])
+                .args(autostart_delete_args())
                 .status()
                 .await;
         }
@@ -307,4 +331,53 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run desktop todo widget");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ease_in_out_hits_endpoints_and_midpoint() {
+        assert!((ease_in_out(0.0) - 0.0).abs() < 1e-12);
+        assert!((ease_in_out(1.0) - 1.0).abs() < 1e-12);
+        assert!((ease_in_out(0.5) - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ease_in_out_is_monotonic() {
+        let mut prev = 0.0;
+        for i in 0..=100 {
+            let value = ease_in_out(i as f64 / 100.0);
+            assert!(value >= prev, "not monotonic at step {i}");
+            prev = value;
+        }
+    }
+
+    #[test]
+    fn lerp_maps_both_endpoints() {
+        assert!((lerp(10.0, 30.0, 0.0) - 10.0).abs() < 1e-12);
+        assert!((lerp(10.0, 30.0, 1.0) - 30.0).abs() < 1e-12);
+        assert!((lerp(10.0, 30.0, 0.5) - 20.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn autostart_add_args_target_same_registry_value() {
+        let exe = r"C:\Apps\desktop-todo.exe";
+        let args = autostart_add_args(exe);
+        assert_eq!(args[0], "add");
+        assert!(args.contains(&AUTOSTART_KEY.to_string()));
+        assert!(args.contains(&AUTOSTART_NAME.to_string()));
+        assert!(args.contains(&exe.to_string()));
+        assert_eq!(args.last().map(String::as_str), Some("/f"));
+    }
+
+    #[test]
+    fn autostart_delete_args_remove_same_registry_value() {
+        let args = autostart_delete_args();
+        assert_eq!(args[0], "delete");
+        assert!(args.contains(&AUTOSTART_KEY.to_string()));
+        assert!(args.contains(&AUTOSTART_NAME.to_string()));
+        assert_eq!(args.last().map(String::as_str), Some("/f"));
+    }
 }

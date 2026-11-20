@@ -1963,11 +1963,26 @@
   // 色条会盖住日期格，双击时按坐标找回下面的格子
   function cellAtPoint(x, y) {
     if (!els.calGrid) return null;
+    const grid = els.calGrid.getBoundingClientRect();
+    // 只接受落在日历网格附近的点，避免点到网格外也命中
+    if (x < grid.left - 2 || x > grid.right + 2 || y < grid.top - 2 || y > grid.bottom + 2) {
+      return null;
+    }
+    let best = null;
+    let bestDist = Infinity;
     for (const cell of els.calGrid.querySelectorAll(".cal-cell")) {
       const rect = cell.getBoundingClientRect();
       if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return cell;
+      // 日期格之间有 2px 间隙：落在间隙里时取最近的格子
+      const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+      const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = cell;
+      }
     }
-    return null;
+    return best;
   }
 
   // 鼠标离开日期格后延迟消失；期间若移到弹框上则保留

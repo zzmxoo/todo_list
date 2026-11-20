@@ -15,7 +15,15 @@ try {
   Start-Sleep -Seconds 5
 
   $expr = Get-Content (Join-Path $PSScriptRoot 'integration-page.js') -Raw -Encoding UTF8
-  $raw = & powershell -NoProfile -ExecutionPolicy Bypass -File $cdp -Port $Port -Expr $expr
+  $tempPath = $env:TEMP
+  if (-not $tempPath) { $tempPath = [System.IO.Path]::GetTempPath() }
+  $exprFile = Join-Path $tempPath ('todo-itest-' + [guid]::NewGuid().ToString('N') + '.js')
+  [System.IO.File]::WriteAllText($exprFile, $expr, (New-Object System.Text.UTF8Encoding($false)))
+  try {
+    $raw = & powershell -NoProfile -ExecutionPolicy Bypass -File $cdp -Port $Port -ExprFile $exprFile
+  } finally {
+    Remove-Item $exprFile -Force -ErrorAction SilentlyContinue
+  }
   $obj = ($raw | Select-Object -Last 1) | ConvertFrom-Json
   $value = $obj.result.result.value
   if (-not $value) {
