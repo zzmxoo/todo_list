@@ -11,6 +11,12 @@ src-tauri\target\release\desktop-todo.exe
 首次运行会在 `%APPDATA%\com.desktoptodo.widget\` 下创建 `data.json` 保存待办、设置和天气缓存；
 选择的背景图也会复制到该目录，移动原图不影响使用。
 
+## 开发文档
+
+- [docs/HANDOFF.md](docs/HANDOFF.md)：项目背景、原始需求、设计规范与约束、架构、版本与后续工作约定（后续会话建议先读）。
+- [tests/TESTING.md](tests/TESTING.md)：测试分层与“该写单元还是集成”的判断。
+- [tests/REGRESSION.md](tests/REGRESSION.md)：历史问题与回归用例清单。
+
 ## 功能
 
 - **待办列表**：点击空白行或「添加待办」输入内容，回车添加；双击事项文字可修改；悬停显示完成 / 置顶 / 结束时间 / 删除按钮。
