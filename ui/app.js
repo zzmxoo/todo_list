@@ -2245,6 +2245,19 @@
     const rect = await getWindowRect();
     settingsSavedSize = { w: rect.w, h: rect.h };
 
+    if (state.settings.calendar) {
+      // 日历模式已是整页布局：设置浮在右侧，只在窗口过窄时补足到不遮挡待办
+      const needW = SETTINGS_W + MARGIN * 2 + CAL_TODO_W + GAP;
+      if (rect.w < needW) {
+        const avail0 = screenBounds();
+        const targetW = Math.min(needW, avail0.right - avail0.left - 8);
+        await setWindowSize(targetW, rect.h);
+        await clampWindowPosition();
+      }
+      els.settingsOverlay.hidden = false;
+      return;
+    }
+
     // 设置以右侧浮动面板展开，窗口加宽，待办卡片保持可见
     const avail = screenBounds();
     const extra = SETTINGS_W + GAP + MARGIN;
