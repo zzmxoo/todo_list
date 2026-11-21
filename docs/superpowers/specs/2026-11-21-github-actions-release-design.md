@@ -45,14 +45,17 @@ on:
 
 步骤：
 
-1. `actions/checkout@v4`
+1. `actions/checkout@v4`，`fetch-depth: 0`、`fetch-tags: true`
 2. 版本一致性校验（PowerShell）
-3. 删除 `src-tauri/.cargo/config.toml`
-4. `dtolnay/rust-toolchain@stable`
-5. `Swatinem/rust-cache@v2`，`workspaces: src-tauri -> target`
-6. 下载并解压 Tauri CLI 预编译包到 `C:\tauri-cli`，加入 `PATH`
-7. `cargo test --release`（仅 Rust 单测）
-8. `tauri-apps/tauri-action@v1`
+3. 生成变更说明（PowerShell，输出为 step output）
+4. 删除 `src-tauri/.cargo/config.toml`
+5. `dtolnay/rust-toolchain@stable`
+6. `Swatinem/rust-cache@v2`，`workspaces: src-tauri -> target`
+7. 下载并解压 Tauri CLI 预编译包到 `C:\tauri-cli`，加入 `PATH`
+8. `cargo test --release`（仅 Rust 单测）
+9. `tauri-apps/tauri-action@v1`
+
+`checkout` 必须完整拉取历史与 tag，否则第 3 步取不到上一个版本 tag，`git log` 也拿不到区间提交。
 
 ### 4.3 版本一致性校验
 
@@ -91,8 +94,8 @@ on:
 | `releaseName` | `桌面待办 ${{ github.ref_name }}` | Release 标题 |
 | `releaseDraft` | `false` | 直接公开 |
 | `prerelease` | `false` | 正式版 |
-| `generateReleaseNotes` | `false` | 用固定正文 |
-| `releaseBody` | 固定的说明文本 | 介绍下载哪个文件、数据目录位置 |
+| `generateReleaseNotes` | `false` | 使用脚本生成的变更说明 |
+| `releaseBody` | `${{ steps.changelog.outputs.body }}` | 由 4.10 节脚本生成 |
 | `uploadPlainBinary` | `true` | 额外上传裸 exe |
 | `releaseAssetNamePattern` | `[mainBinaryName]_[version]_[arch][setup].[ext]` | 资产名规范化为 ASCII |
 
@@ -132,6 +135,33 @@ CI 运行 `cargo test --release`，覆盖 `main.rs` 的 `mod tests`（缓动函�
 
 CI **不运行** `tests/regression.ps1`：它需要启动真实 WebView2 窗口并通过 CDP 9222 注入脚本，在无交互桌面的 runner 上不可靠。前端回归仍由本地提交前手动执行。
 
+### 4.10 变更说明生成
+
+Release 正文由 CI 根据提交历史自动归纳，**概括性描述，不逐条罗列提交**。
+
+**步骤**
+
+1. 用 `git describe --tags --abbrev=0 $env:GITHUB_REF_NAME^` 找上一个版本 tag。
+2. 取区间 `上一个tag..本次tag` 的提交标题（`git log --no-merges --format=%s`）。
+3. 过滤以下噪声：
+   - `版本号更新为 x` / `版本号更新` 开头的提交
+   - 合并提交（`--no-merges` 已排除）
+4. 按提交标题里的关键词归类到三组，每组最多保留 5 条、每条截断到 40 字：
+   - **新增**：含「新增」「添加」「支持」「增加」之一，或标题以「增加」开头
+   - **修复**：含「修复」「修正」「解决」「问题」之一
+   - **优化**：含「优化」「改进」「提升」「降低」「加快」「改为」「调整」之一
+5. 未命中任何关键词的提交归入 **其它变更**，只保留前 3 条。
+6. 若三个分组都为空（例如首次发布或区间内只有版本号提交），正文退化为一句「本次更新包含若干内部调整与稳定性改进。」，不输出空小节。
+7. 拼装正文：固定头部（下载说明 + 数据目录位置）+ 变更小节。输出到 step output `body`。
+
+**首次发布处理**：若找不到上一个 tag，则取该 tag 之前最近 20 条提交作为区间，并在正文头部注明「首个发布版本」。
+
+**与提交风格的关系**：本仓提交标题是自然语言中文（如「修复开机启动开关点击后长时间无响应」），关键词归类正是基于这个事实设计的。若后续改用 `feat:` / `fix:` 前缀，归类规则需同步调整。
+
+**为什么不直接给用户整段提交列表**：用户明确要求概括说明。逐条罗列会让 Release 页变成提交日志，且本项目提交粒度高，同一功能常有十余条提交。
+
+**为什么不复用 GitHub 的 `generateReleaseNotes`**：它基于 PR 与 issue 生成，本仓直接向 `master` 提交、不走 PR，产出会是空或英文标题，且无法按中文语义归类。
+
 ## 5. 错误处理
 
 | 场景 | 行为 |
@@ -141,6 +171,8 @@ CI **不运行** `tests/regression.ps1`：它需要启动真实 WebView2 窗口�
 | 打包失败 | 作业失败，不创建 Release |
 | Release 已存在 | `tauri-action` 更新该 Release 的名称与正文并覆盖同名资产 |
 | 重复推送同一 tag | GitHub 拒绝，不触发 |
+| 找不到上一个 tag | 取最近 20 条提交，正文注明「首个发布版本」 |
+| 区间内无提交 | 正文退化为一句概括，不输出空小节 |
 | `productName` 中文导致打包失败 | 见第 7 节回退方案 |
 
 ## 6. 发版流程
@@ -154,7 +186,31 @@ git tag -a 0.0.6 -m "0.0.6"
 git push origin 0.0.6
 ```
 
-推 tag 即触发，完成后 Release 页面出现三个资产。
+推 tag 即触发，完成后 Release 页面出现三个资产与自动生成的变更说明。
+
+## 6.1 变更说明样例
+
+```
+## 桌面待办 0.0.6
+
+**下载**
+- `desktop-todo_0.0.6_x64-setup.exe` —— 安装版（推荐）
+- `desktop-todo_0.0.6_x64.exe` —— 免安装，直接双击运行
+- `desktop-todo_0.0.6_x64.msi` —— 系统安装包
+
+用户数据位于 `%APPDATA%\com.desktoptodo.widget\data.json`，升级不会丢失。
+
+### 新增
+- 新增 GitHub Actions 自动编译发布
+
+### 修复
+- 修复开机启动开关点击后长时间无响应
+
+### 优化
+- 优化边缘隐藏动画的衔接流畅度
+```
+
+该样例仅用于说明结构，实际正文由 CI 生成。
 
 ## 7. 已知风险与回退
 
