@@ -97,7 +97,7 @@ on:
 | `generateReleaseNotes` | `false` | 使用脚本生成的变更说明 |
 | `releaseBody` | `${{ steps.changelog.outputs.body }}` | 由 4.10 节脚本生成 |
 | `uploadPlainBinary` | `true` | 额外上传裸 exe |
-| `releaseAssetNamePattern` | `[mainBinaryName]_[version]_[arch][setup].[ext]` | 资产名规范化为 ASCII |
+| `releaseAssetNamePattern` | `[mainBinaryName]_[version][setup].[ext]` | 资产名规范化为 ASCII |
 
 `--bundles nsis,msi` 必须显式给出，因为 `bundle.targets` 为 `"all"` 会在 Windows 上连带尝试其它目标。
 
@@ -107,9 +107,11 @@ on:
 
 | 产物 | 资产名 |
 | --- | --- |
-| 裸可执行文件 | `desktop-todo_0.0.5_x64.exe` |
-| NSIS 安装包 | `desktop-todo_0.0.5_x64-setup.exe` |
-| MSI 安装包 | `desktop-todo_0.0.5_x64.msi` |
+| 裸可执行文件 | `desktop-todo_0.0.5.exe` |
+| NSIS 安装包 | `desktop-todo_0.0.5-setup.exe` |
+| MSI 安装包 | `desktop-todo_0.0.5.msi` |
+
+不使用 `[arch]` 占位符：只构建 x64 单一架构，它没有信息量，且其取值在不同平台格式不一致（`x64` / `x86_64`），会让正文里的下载文件名与实际资产对不上。
 
 安装包内部的应用名仍是中文 `桌面待办`（`productName` 不变），只规范下载文件名。
 
@@ -144,12 +146,13 @@ Release 正文由 CI 根据提交历史自动归纳，**概括性描述，不逐
 1. 用 `git describe --tags --abbrev=0 $env:GITHUB_REF_NAME^` 找上一个版本 tag。
 2. 取区间 `上一个tag..本次tag` 的提交标题（`git log --no-merges --format=%s`）。
 3. 过滤以下噪声：
-   - `版本号更新为 x` / `版本号更新` 开头的提交
+   - 以「版本号更新为 x」开头的提交：**只剥掉版本号前缀，保留后面的真实描述**（例如「版本号更新为 0.0.3，并修复输入待办被后台刷新清空」→「并修复输入待办被后台刷新清空」）。整条丢弃会在版本提交夹带改动时丢失信息。
+   - 剥离后为空的提交直接丢弃
    - 合并提交（`--no-merges` 已排除）
-4. 按提交标题里的关键词归类到三组，每组最多保留 5 条、每条截断到 40 字：
-   - **新增**：含「新增」「添加」「支持」「增加」之一，或标题以「增加」开头
-   - **修复**：含「修复」「修正」「解决」「问题」之一
-   - **优化**：含「优化」「改进」「提升」「降低」「加快」「改为」「调整」之一
+4. 按提交标题里的关键词归类到三组。同一提交命中多个关键词时，**取最靠前的命中位置所属的分组**（避免「新增回归测试集，修复…」被错误归入修复），然后按 修复 → 新增 → 优化 的顺序判定（同位置优先修复）。每组最多保留 5 条、每条截断到 40 字：
+   - **新增**：含「新增」「添加」「支持」「增加」
+   - **修复**：含「修复」「修正」「解决」「问题」
+   - **优化**：含「优化」「改进」「提升」「降低」「加快」「改为」「调整」「提速」
 5. 未命中任何关键词的提交归入 **其它变更**，只保留前 3 条。
 6. 若三个分组都为空（例如首次发布或区间内只有版本号提交），正文退化为一句「本次更新包含若干内部调整与稳定性改进。」，不输出空小节。
 7. 拼装正文：固定头部（下载说明 + 数据目录位置）+ 变更小节。输出到 step output `body`。
@@ -178,7 +181,7 @@ Release 正文由 CI 根据提交历史自动归纳，**概括性描述，不逐
 ## 6. 发版流程
 
 ```bash
-# 1. 修改版本号（Cargo.toml、tauri.conf.json、ui 中的版本显示）
+# 1. 修改版本号（Cargo.toml、Cargo.lock、tauri.conf.json）
 # 2. 提交
 git commit -am "版本号更新为 0.0.6"
 # 3. 打 tag 并推送
@@ -188,15 +191,17 @@ git push origin 0.0.6
 
 推 tag 即触发，完成后 Release 页面出现三个资产与自动生成的变更说明。
 
+**注意**：push 事件使用被推 ref 上的工作流文件。工作流首次落地前打的 tag 不会触发构建，第一次端到端验证必须用新增的 tag。
+
 ## 6.1 变更说明样例
 
 ```
 ## 桌面待办 0.0.6
 
 **下载**
-- `desktop-todo_0.0.6_x64-setup.exe` —— 安装版（推荐）
-- `desktop-todo_0.0.6_x64.exe` —— 免安装，直接双击运行
-- `desktop-todo_0.0.6_x64.msi` —— 系统安装包
+- `desktop-todo_0.0.6-setup.exe` —— 安装版（推荐）
+- `desktop-todo_0.0.6.exe` —— 免安装，直接双击运行
+- `desktop-todo_0.0.6.msi` —— 系统安装包
 
 用户数据位于 `%APPDATA%\com.desktoptodo.widget\data.json`，升级不会丢失。
 
