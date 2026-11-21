@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 生成变更说明
+        id: changelog
+        shell: pwsh
+        run: ./.github/scripts/changelog.ps1 -Tag "$env:GITHUB_REF_NAME"
+
+      # 仓库里的 cargo 镜像指向 rsproxy.cn，美国 runner 访问很慢
+      - name: 移除国内镜像
+        shell: pwsh
+        run: Remove-Item src-tauri/.cargo/config.toml -Force
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 安装 Tauri CLI
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP 'tauri-cli'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'cargo-tauri.zip'
+          Invoke-WebRequest -Uri 'https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.6/cargo-tauri-x86_64-pc-windows-msvc.zip' -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
+          $dest | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: 单元测试
+        shell: pwsh
+        working-directory: src-tauri
+        run: cargo test --release
+
+      - name: 打包并发布
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tauriScript: cargo tauri
+          args: --bundles nsis,msi
+          tagName: ${{ github.ref_name }}
+          releaseName: 桌面待办 ${{ github.ref_name }}
+          releaseBody: ${{ steps.changelog.outputs.body }}
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: false
+          uploadPlainBinary: true
+          releaseAssetNamePattern: '[mainBinaryName]_[version][setup].[ext]'
