@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-推送版本 tag 时，在 GitHub 托管的 Windows runner 上自动编译并打包桌面待办，产出可执行文件与两种安装包，随后自动创建公开的 GitHub Release。
+推送版本 tag 时，在 GitHub 托管的 Windows runner 上自动编译并打包桌面待办，产出可执行文件与 NSIS 安装包，随后自动创建公开的 GitHub Release。
 
 ## 2. 现状与约束
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 前端 | `ui/` 纯静态，无构建步骤 | CI 不需要 Node，只要 Rust |
 | 构建入口 | `cargo build --release` | 只出裸 exe，不出安装包 |
-| `bundle.active` | `false` | 必须改为 `true` 才能产出 MSI / NSIS |
+| `bundle.active` | `false` | 必须改为 `true` 才能产出安装包 |
 | cargo 镜像 | `src-tauri/.cargo/config.toml` 指向 `rsproxy.cn` | 美国 runner 访问国内镜像会超时，CI 必须绕过 |
 | `Cargo.lock` | 全部依赖源为标准 `crates.io` | 绕过镜像不会触发锁文件重写 |
 | 版本号 | `Cargo.toml`、`tauri.conf.json` 均为 `0.0.5` | 需与 tag 校验 |
@@ -89,7 +89,7 @@ on:
 | --- | --- | --- |
 | `projectPath` | `src-tauri` | Tauri 项目根 |
 | `tauriScript` | `cargo tauri` | 使用预编译 CLI |
-| `args` | `--bundles nsis,msi` | 只要 Windows 两种安装包 |
+| `args` | `--bundles nsis` | 只产 NSIS 安装包 |
 | `tagName` | `${{ github.ref_name }}` | 用触发 tag 作 Release tag |
 | `releaseName` | `桌面待办 ${{ github.ref_name }}` | Release 标题 |
 | `releaseDraft` | `false` | 直接公开 |
@@ -99,7 +99,7 @@ on:
 | `uploadPlainBinary` | `true` | 额外上传裸 exe |
 | `releaseAssetNamePattern` | `[mainBinaryName]_[version][setup].[ext]` | 资产名规范化为 ASCII |
 
-`--bundles nsis,msi` 必须显式给出，因为 `bundle.targets` 为 `"all"` 会在 Windows 上连带尝试其它目标。
+`--bundles nsis` 必须显式给出，因为 `bundle.targets` 为 `"all"` 会在 Windows 上连带尝试其它目标。MSI 已移除：WiX 默认 codepage 1252 不支持中文产品名，且 NSIS 安装包足以覆盖使用场景。
 
 ### 4.7 产物命名
 
@@ -109,7 +109,6 @@ on:
 | --- | --- |
 | 裸可执行文件 | `desktop-todo_0.0.5.exe` |
 | NSIS 安装包 | `desktop-todo_0.0.5-setup.exe` |
-| MSI 安装包 | `desktop-todo_0.0.5.msi` |
 
 不使用 `[arch]` 占位符：只构建 x64 单一架构，它没有信息量，且其取值在不同平台格式不一致（`x64` / `x86_64`），会让正文里的下载文件名与实际资产对不上。
 
@@ -189,7 +188,7 @@ git tag -a 0.0.6 -m "0.0.6"
 git push origin 0.0.6
 ```
 
-推 tag 即触发，完成后 Release 页面出现三个资产与自动生成的变更说明。
+推 tag 即触发，完成后 Release 页面出现两个资产与自动生成的变更说明。
 
 **注意**：push 事件使用被推 ref 上的工作流文件。工作流首次落地前打的 tag 不会触发构建，第一次端到端验证必须用新增的 tag。
 
@@ -201,7 +200,6 @@ git push origin 0.0.6
 **下载**
 - `desktop-todo_0.0.6-setup.exe` —— 安装版（推荐）
 - `desktop-todo_0.0.6.exe` —— 免安装，直接双击运行
-- `desktop-todo_0.0.6.msi` —— 系统安装包
 
 用户数据位于 `%APPDATA%\com.desktoptodo.widget\data.json`，升级不会丢失。
 
@@ -219,11 +217,11 @@ git push origin 0.0.6
 
 ## 7. 已知风险与回退
 
-**中文 `productName` 打包风险。** Tauri 在 Windows 上会用 `productName` 命名 MSI/NSIS 安装包与安装目录。中文在 WiX 与 NSIS 中通常可用，但尚未在本项目实测。若首次运行在打包阶段失败：
+**中文 `productName` 打包风险（已实测并解决）。** 首次运行（0.0.6）在 MSI 阶段失败：WiX 数据库默认 codepage 1252，无法编码中文产品名，报 `LGHT0311`。NSIS 同次运行成功。
 
-回退方案是在 `tauri.conf.json` 的 `bundle` 段显式设置 ASCII 名称，或给 `productName` 增加 ASCII 变体，保留中文用于窗口标题与托盘。该回退只改配置，不动代码。
+处理结果：直接放弃 MSI，只产 NSIS；NSIS 显式指定 `languages: ["SimpChinese"]`。最终产物为 `desktop-todo_<ver>-setup.exe` 与 `desktop-todo_<ver>.exe`。若将来必须恢复 MSI，需要 `wix.language: "zh-CN"`，或改用 ASCII 的 `productName`。
 
-**首次运行验证。** 推现有 `0.0.5` tag 即可做第一次端到端验证，不需要先改版本号。
+**已验证。** 0.0.6 tag 端到端跑通：8 个步骤全绿，Release 自动创建并上传两个资产。
 
 ## 8. 不在本次范围
 

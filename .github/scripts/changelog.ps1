@@ -104,7 +104,6 @@ if ($isFirst) {
 $lines.Add('**下载**')
 $lines.Add('- `desktop-todo_' + $version + '-setup.exe` —— 安装版（推荐）')
 $lines.Add('- `desktop-todo_' + $version + '.exe` —— 免安装，直接双击运行')
-$lines.Add('- `desktop-todo_' + $version + '.msi` —— 系统安装包')
 $lines.Add('')
 $lines.Add('用户数据位于 `%APPDATA%\com.desktoptodo.widget\data.json`，升级不会丢失。')
 

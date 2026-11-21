@@ -48,12 +48,6 @@ jobs:
         working-directory: src-tauri
         run: cargo test --release
 
-      # 先用 CLI 直接打包一次：失败时错误会完整出现在日志里，
-      # 否则 tauri-action 只报告 exit code 1，难以定位
-      - name: 预打包（用于暴露打包错误）
-        shell: pwsh
-        run: cargo tauri build --bundles nsis,msi
-
       - name: 打包并发布
         uses: tauri-apps/tauri-action@v1
         env:
@@ -61,7 +55,7 @@ jobs:
         with:
           projectPath: .
           tauriScript: cargo tauri
-          args: --bundles nsis,msi
+          args: --bundles nsis
           tagName: ${{ github.ref_name }}
           releaseName: 桌面待办 ${{ github.ref_name }}
           releaseBody: ${{ steps.changelog.outputs.body }}
