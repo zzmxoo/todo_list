@@ -25,3 +25,7 @@ desktop.ini
 
 # agent scratch
 .superpowers/
+
+# 名言库人工复查用的临时导出/分析文件
+quotes_export.txt
+quotes_negative_check.md
