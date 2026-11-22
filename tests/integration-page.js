@@ -1062,18 +1062,19 @@
     const status = () => ($('#wcStatus') || {}).textContent || '';
     const input = $('#cityInput');
     if (!input) return 'skip: no city input';
-    const origFetch = window.fetch;
+    // 天气/地理编码请求现在统一走 Rust 的 fetch_json（CSP 不允许渲染进程直连），
+    // 所以断网要拦 invoke，而不是 window.fetch。
+    const realInvoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
     const setCity = (name) => {
       input.value = name;
       input.dispatchEvent(new Event('change', { bubbles: true }));
     };
     let blocked = false;
-    window.fetch = function (...args) {
-      const url = String(args[0]);
-      if (blocked && /open-meteo|nominatim/.test(url)) {
-        return Promise.reject(new TypeError('Failed to fetch'));
+    window.__TEST_INVOKE = function (cmd, args) {
+      if (blocked && cmd === 'fetch_json') {
+        return Promise.reject(new Error('network error: connection failed'));
       }
-      return origFetch.apply(this, args);
+      return realInvoke(cmd, args);
     };
     const startedAt = input.value;
     try {
@@ -1106,7 +1107,7 @@
       return 'recovered in ' + Math.round(recovered) + 'ms';
     } finally {
       blocked = false;
-      window.fetch = origFetch;
+      window.__TEST_INVOKE = null;
     }
   });
 

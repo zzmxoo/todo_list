@@ -1699,11 +1699,10 @@
   }
 
   async function geocodeCity(city) {
+    // 统一走 Rust 代发，避免受渲染进程 CSP 限制；超时由 Rust 侧控制
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh&format=json`;
-    const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(12000) });
-    if (!geoRes.ok) throw new Error("城市查询失败");
-    const geo = await geoRes.json();
-    const first = geo.results && geo.results[0];
+    const geo = await invoke("fetch_json", { url: geoUrl });
+    const first = geo && geo.results && geo.results[0];
     if (!first) throw new Error(`找不到城市「${city}」`);
     return first;
   }
@@ -1767,8 +1766,14 @@
       renderWeatherPill();
       renderCalendar();
     } catch (err) {
-      // 只有真正的网络层失败才视为「不可联网」，城市不存在等业务错误不影响悬停信息
-      const isNetwork = err && (err.name === "TimeoutError" || err.name === "TypeError");
+      // 只有真正的网络层失败才视为「不可联网」，城市不存在等业务错误不影响悬停信息。
+      // 请求可能走原生 fetch（浏览器错误对象）或 Rust fetch_json（错误字符串），两种都识别。
+      const text = (err && (err.message || String(err))) || "";
+      const isNetwork =
+        !!err &&
+        (err.name === "TimeoutError" ||
+          err.name === "TypeError" ||
+          /network|timed? ?out|connect|dns|resolve|unreachable|请求失败/i.test(text));
       if (isNetwork) networkOk = false;
       weatherFailed += 1;
       console.warn("weather failed", err);
@@ -2129,12 +2134,8 @@
     holidayBusy.add(year);
     (async () => {
       try {
-        const res = await fetch(HOLIDAY_URL(year), {
-          signal: AbortSignal.timeout(12000),
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`节假日请求失败 ${res.status}`);
-        const data = await res.json();
+        // 走 Rust 代发：渲染进程 CSP 不允许直连第三方域名
+        const data = await invoke("fetch_json", { url: HOLIDAY_URL(year) });
         const days = (Array.isArray(data.days) ? data.days : [])
           .filter((day) => day && typeof day.date === "string" && day.date.startsWith(`${year}-`))
           .map((day) => ({
@@ -2475,9 +2476,7 @@
       const url =
         `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
         `&lat=${lat}&lon=${lon}&zoom=10&addressdetails=1&accept-language=zh-CN`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await invoke("fetch_json", { url });
       const address = data.address || {};
       const parts = String(data.display_name || "").split(",").map((part) => part.trim());
       const cityPart = parts.find((part) => /(市|自治州|地区|盟)$/.test(part));

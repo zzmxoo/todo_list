@@ -98,7 +98,8 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
     }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(12))
-        .user_agent("desktop-todo/0.1")
+        // OSM Nominatim 使用政策要求可识别的 UA，含应用名与联系方式
+        .user_agent("desktop-todo/0.0.7 (https://github.com/zzmxoo/todo_list)")
         .build()
         .map_err(|e| e.to_string())?;
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
