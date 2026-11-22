@@ -223,6 +223,9 @@
   const weekScroll = new Map();
   const MAX_BARS = 3;
   const INFO_HIDE_DELAY = 1200;
+  // 单击弹出后的停留时长：弹框可能出现在光标上方，需要足够时间移过去。
+  // 悬停触发（光标已在格子上）用 INFO_HIDE_DELAY 即可。
+  const INFO_CLICK_HOLD = 3000;
   let lastQuoteIndex = -1;
   let networkOk = null;
   let calPress = null;
@@ -2046,13 +2049,14 @@
     return best;
   }
 
-  // 鼠标离开日期格后延迟消失；期间若移到弹框上则保留
-  function scheduleHideCalInfo() {
+  // 鼠标离开日期格后延迟消失；期间若移到弹框上则保留。
+  // delay 可覆盖：单击弹出时弹框可能位于光标上方，需要更长的时间让用户移过去。
+  function scheduleHideCalInfo(delay = INFO_HIDE_DELAY) {
     cancelInfoHide();
     infoHideTimer = setTimeout(() => {
       infoHideTimer = null;
       hideCalInfo();
-    }, INFO_HIDE_DELAY);
+    }, delay);
   }
 
   function showCalInfo(cell, date) {
@@ -2807,8 +2811,8 @@
       hideCalInfo();
       hoverCell = press.cell;
       showCalInfo(press.cell, new Date(yy, mm - 1, dd));
-      // 光标若不在弹框上，按既有超时自动关闭
-      scheduleHideCalInfo();
+      // 单击后给足时间把光标移到弹框上；移上去后 mouseenter 会取消这个计时
+      scheduleHideCalInfo(INFO_CLICK_HOLD);
     });
   }
 

@@ -686,9 +686,9 @@
     return 'ok';
   });
 
-  await t('[REG-40] 单击日期格弹出信息，光标不留在弹框上则超时关闭', async () => {
-    // 需求：单击日期格即时弹出农历/格言；与拖动窗口共用左键，
-    // 需靠位移阈值区分。弹出后若光标不悬停在弹框上，按既有 1.2s 超时关闭。
+  await t('[REG-40] 单击日期格弹出信息，停留时间够移动到弹框上', async () => {
+    // 需求：单击日期格即时弹出农历/格言；与拖动窗口共用左键，需靠位移阈值区分。
+    // 单击后的停留时间必须够用户把光标移到弹框上，否则还没移过去就关了。
     // showCalInfo 在网络失败时会直接 return，先确认环境允许弹框。
     const info = $('#calInfo');
     info.hidden = true;
@@ -710,9 +710,19 @@
     await sleep(150);
     ok(!info.hidden, 'click shows info immediately');
 
-    // 光标不在弹框上：应在既有超时后自动关闭
-    await sleep(1600);
-    ok(info.hidden, 'auto-hidden after timeout when not hovering popup');
+    // 关键：2 秒内不能消失，否则用户来不及把光标移到弹框上
+    await sleep(2000);
+    ok(!info.hidden, 'still visible at 2s (enough time to reach the popup)');
+
+    // 光标移到弹框上：保持显示，不再自动关闭
+    info.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await sleep(4000);
+    ok(!info.hidden, 'stays open while hovering the popup');
+    info.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+
+    // 离开后按超时关闭
+    await sleep(3800);
+    ok(info.hidden, 'auto-hidden after leaving popup');
 
     // 拖动超过阈值不应弹出
     info.hidden = true;
@@ -722,7 +732,7 @@
     await sleep(200);
     ok(info.hidden, 'drag must not show info');
     info.hidden = true;
-    return 'click shows, drag does not';
+    return 'holds 2s+, stays while hovered, drag does not show';
   });
 
   await t('[REG-19] 节气当天显示节气名与背景', async () => {
