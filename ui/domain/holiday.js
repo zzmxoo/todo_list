@@ -19,38 +19,65 @@
     return map;
   }
 
-  // 节日底色。注意：这些值只以约 24% 叠在固定暖底上呈现，
-  // 因此需要拉开发色相与明度差，否则渲染出来会全都一样。
-  // 整体避开红色系（色相 345°–15°），改用橙/琥珀/金/橄榄/古铜，
-  // 靠明度梯度拉开区分度；清明节保留清冷竹青以贴合节气氛围。
-  const TINT = {
-    元旦: "255, 224, 130",   // 浅黄（最亮）
-    春节: "240, 140, 8",     // 浓橙
-    清明节: "122, 200, 168", // 竹青（冷色豁免）
-    劳动节: "214, 168, 56",  // 琥珀
-    端午节: "158, 178, 62",  // 橄榄绿
-    中秋节: "255, 246, 218", // 奶白金
-    国庆节: "168, 110, 40",  // 深古铜（最暗）
+  // 节日底色按「节日大小」分成两个色系，而不是每个节日一种颜色。
+  // 大节日统一柔和暖色（桃色 #F6C172），小节日用低饱和竹青。
+  // 只以 12% 叠在玻璃背景上，靠明度微差 + 加粗文字色区分，
+  // 避免大面积高亮色块抢走左侧待办清单的视觉焦点。
+  const GROUPS = {
+    // 大节日：柔和桃色，暖色系
+    warm: {
+      tint: "246, 193, 114",
+      members: ["春节", "国庆节", "元旦"],
+    },
+    // 小节日/节气：低饱和竹青，偏冷
+    cool: {
+      tint: "150, 200, 185",
+      members: ["清明节", "端午节", "劳动节", "中秋节"],
+    },
   };
 
-  // 节日格固定的暖底，避免 --hd 被用户选的冷色玻璃背景稀释成蓝紫。
-  const TINT_BASE = "58, 34, 30";
-  // 清明节用更冷的底色，保留清冷氛围。
-  const TINT_BASE_QINGMING = "28, 48, 42";
-  // 叠色透明度
-  const TINT_ALPHA = 0.24;
+  // 叠色透明度（与 styles.css 中 .cal-cell.holiday 保持一致）
+  const TINT_ALPHA = 0.12;
 
-  /** 取节日底色 "r, g, b"；未匹配到节日时回退到中性暖色。 */
-  function holidayTint(name) {
-    // 数据源对早年使用合并名（如"国庆节、中秋节"），先按分隔符取首个匹配
-    const first = String(name || "").split(/[、,，]/)[0].trim();
-    return TINT[first] || "246, 186, 96";
+  // 节日格叠色所在的底层 = 日历卡的玻璃背景。
+  // 取 --glass-hi 与深色桌面合成后的近似值，用于计算渲染结果。
+  const TINT_SURFACE = "48, 39, 105";
+
+  const NAME_TO_GROUP = (() => {
+    const map = new Map();
+    for (const [group, cfg] of Object.entries(GROUPS)) {
+      for (const name of cfg.members) map.set(name, group);
+    }
+    return map;
+  })();
+
+  /** 去掉合并名（如"国庆节、中秋节"）只取首个节日。 */
+  function primaryName(name) {
+    return String(name || "").split(/[、,，]/)[0].trim();
   }
 
-  /** 取节日格的暖底色。 */
-  function holidayBase(name) {
-    const first = String(name || "").split(/[、,，]/)[0].trim();
-    return first === "清明节" ? TINT_BASE_QINGMING : TINT_BASE;
+  /** 节日所属色系；未知节日归入 cool（低饱和竹青，最不抢眼）。 */
+  function groupOf(name) {
+    return NAME_TO_GROUP.get(primaryName(name)) || "cool";
+  }
+
+  /** 取节日底色 "r, g, b"。 */
+  function holidayTint(name) {
+    return GROUPS[groupOf(name)].tint;
+  }
+
+  /** 取节日格的底色。不再垫不透明底，统一叠在玻璃背景上。 */
+  function holidayBase() {
+    return TINT_SURFACE;
+  }
+
+  /** 返回节日配色表 { 节日名 -> 色系 }，供测试与调试使用。 */
+  function tintGroups() {
+    const out = {};
+    for (const [group, cfg] of Object.entries(GROUPS)) {
+      for (const name of cfg.members) out[name] = group;
+    }
+    return out;
   }
 
   function parseRgb(rgbText) {
@@ -90,17 +117,29 @@
   }
 
   /**
-   * 判断节日格实际渲染出来是否偏冷或过暗。
-   * 关键：判的是叠色合成后的颜色，不是常量本身。
-   * 暖区定义为色相 ≤ 70° 或 ≥ 330°（红/橙/黄/粉），其余视为冷色。
+   * 判断节日格实际渲染出来是否过暗（不可读）。
+   * 注意：不再判"是否偏冷"——冷色分组（清明/端午的竹青）是有意为之。
    */
-  function isRenderedTintColdOrDim(name) {
+  function isRenderedTintTooDim(name) {
     const rendered = composite(holidayTint(name), holidayBase(name), TINT_ALPHA);
     if (!rendered) return true;
-    const hue = hueOf(rendered);
-    const warm = hue <= 70 || hue >= 330;
-    const dim = relativeLuminance(rendered) < 0.03;
-    return !warm || dim;
+    return relativeLuminance(rendered) < 0.02;
+  }
+
+  /** 渲染后的色相。 */
+  function renderedHue(name) {
+    const rendered = composite(holidayTint(name), holidayBase(name), TINT_ALPHA);
+    return rendered ? hueOf(rendered) : 0;
+  }
+
+  /** 渲染后的饱和度（0-1），用于校验整体是低饱和配色。 */
+  function renderedSaturation(name) {
+    const rendered = composite(holidayTint(name), holidayBase(name), TINT_ALPHA);
+    if (!rendered) return 1;
+    const [r, g, b] = rendered.map((c) => c / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    return max === 0 ? 0 : (max - min) / max;
   }
 
   /** 两个节日渲染后的颜色差异（RGB 欧氏距离，用于判断是否可区分）。 */
@@ -115,10 +154,14 @@
     buildHolidayMap,
     holidayTint,
     holidayBase,
-    isRenderedTintColdOrDim,
+    groupOf,
+    tintGroups,
+    isRenderedTintTooDim,
+    renderedHue,
+    renderedSaturation,
     renderedTintDistance,
     composite,
-    TINT,
+    GROUPS,
     TINT_ALPHA,
   };
 });

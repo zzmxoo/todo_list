@@ -269,7 +269,7 @@
   const { parseDue, dueState, dueText, todoDuration, sortTodos, createTodo, applyDone } =
     window.TodoDomain;
   const { buildEvents, buildMonthWeeks } = window.CalendarDomain;
-  const { buildHolidayMap, holidayTint, holidayBase } = window.HolidayDomain;
+  const { buildHolidayMap, holidayTint } = window.HolidayDomain;
   const { pickQuote } = window.QuoteDomain;
 
   function wmoInfo(code) {
@@ -2218,7 +2218,6 @@
           cell.dataset.holiday = holidayName;
           cell.title = holidayName;
           cell.style.setProperty("--hd", holidayTint(holidayName));
-          cell.style.setProperty("--hdb", holidayBase(holidayName));
         }
 
         const day = document.createElement("span");

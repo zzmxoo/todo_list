@@ -65,88 +65,84 @@
     eq(picked.index, 0);
   });
 
-  test('节日格渲染后整体偏暖（清明节豁免）', () => {
-    // 关键：判的是叠色合成后的颜色，不是常量。常量再暖，被冷色玻璃底
-    // 稀释后仍会渲染成蓝紫，这正是之前遗漏的问题。
-    const expected = ['元旦', '春节', '清明节', '劳动节', '端午节', '中秋节', '国庆节'];
-    const missing = expected.filter((n) => !(n in holiday.TINT));
-    if (missing.length) throw new Error('缺少节日: ' + missing.join(','));
-    const wrong = [];
-    for (const name of expected) {
-      if (name === '清明节') continue; // 冷色豁免
-      if (holiday.isRenderedTintColdOrDim(name)) {
-        wrong.push(`${name} 渲染后偏冷或偏暗`);
-      }
+  test('节日按大小分两个色系：大节日柔和暖色，小节日低饱和竹青', () => {
+    // 需求：颜色不要太多。大节日统一一个暖色系，小节日用同色系的冷色。
+    const groups = holiday.GROUPS;
+    eq(Object.keys(groups).length, 2, '色系数');
+    for (const name of ['春节', '国庆节', '元旦']) {
+      eq(holiday.groupOf(name), 'warm', name + ' 应在暖色系');
     }
-    if (wrong.length) throw new Error(wrong.join('; '));
+    for (const name of ['清明节', '端午节', '劳动节', '中秋节']) {
+      eq(holiday.groupOf(name), 'cool', name + ' 应在冷色系');
+    }
+    const all = ['元旦', '春节', '清明节', '劳动节', '端午节', '中秋节', '国庆节'];
+    const missing = all.filter((n) => !holiday.tintGroups()[n]);
+    if (missing.length) throw new Error('缺少节日: ' + missing.join(','));
   });
 
-  test('节日配色不使用红色系', () => {
-    // 需求：不要红色系。红色区间取色相 345°–15°（含正红、品红边），
-    // 常量与渲染后都要检查——透明叠色会把红色往底色方向拉，两个都看更稳。
-    const hueOf = (text) => {
-      const [r, g, b] = text.split(',').map((n) => Number(n.trim()) / 255);
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const d = max - min;
-      if (d === 0) return 0;
-      let h;
-      if (max === r) h = 60 * (((g - b) / d) % 6);
-      else if (max === g) h = 60 * ((b - r) / d + 2);
-      else h = 60 * ((r - g) / d + 4);
-      return h < 0 ? h + 360 : h;
+  test('同色系的节日渲染色完全一致', () => {
+    eq(holiday.holidayTint('春节'), holiday.holidayTint('国庆节'), '春节/国庆同色');
+    eq(holiday.holidayTint('元旦'), holiday.holidayTint('国庆节'), '元旦/国庆同色');
+    eq(holiday.holidayTint('清明节'), holiday.holidayTint('端午节'), '清明/端午同色');
+    eq(holiday.holidayTint('劳动节'), holiday.holidayTint('中秋节'), '劳动/中秋同色');
+  });
+
+  test('节日色块视觉重量足够轻，不能抢走主界面焦点', () => {
+    // 需求：连续 7 天的大面积高亮色块会抢走左侧待办清单的焦点，
+    // 甚至比"今天"的白框还重。要求渲染后与普通格的差异远小于早期实现。
+    // 早期不透明底方案差异约 84；12% 单层叠色约 30。
+    const surface = [48, 39, 105];
+    const limit = 40;
+    const heavy = [];
+    for (const name of Object.keys(holiday.tintGroups())) {
+      const rendered = holiday.composite(
+        holiday.holidayTint(name),
+        holiday.holidayBase(name),
+        holiday.TINT_ALPHA
+      );
+      const d = Math.sqrt(rendered.reduce((sum, v, i) => sum + (v - surface[i]) ** 2, 0));
+      if (d > limit) heavy.push(`${name} 差异 ${d.toFixed(1)}`);
+    }
+    if (heavy.length) throw new Error('色块过重: ' + heavy.join('; '));
+  });
+
+  test('节日文字在浅色块上仍可读（对比度 ≥ 4.5）', () => {
+    const lumOf = (rgb) => {
+      const lin = (c) => {
+        const v = c / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
     };
-    const isRed = (h) => h <= 15 || h >= 345;
+    const contrast = (a, b) => {
+      const la = lumOf(a);
+      const lb = lumOf(b);
+      const hi = Math.max(la, lb);
+      const lo = Math.min(la, lb);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const label = [255, 217, 210];
     const bad = [];
-    for (const name of Object.keys(holiday.TINT)) {
-      if (name === '清明节') continue; // 竹青，本就不是红色
-      const raw = holiday.holidayTint(name);
-      const rendered = holiday.composite(raw, holiday.holidayBase(name), holiday.TINT_ALPHA);
-      const renderedText = rendered ? rendered.join(', ') : '';
-      const h1 = hueOf(raw);
-      const h2 = renderedText ? hueOf(renderedText) : h1;
-      if (isRed(h1)) bad.push(`${name} 常量色相 ${Math.round(h1)}° 偏红`);
-      if (isRed(h2)) bad.push(`${name} 渲染色相 ${Math.round(h2)}° 偏红`);
+    for (const name of Object.keys(holiday.tintGroups())) {
+      const cell = holiday.composite(
+        holiday.holidayTint(name),
+        holiday.holidayBase(name),
+        holiday.TINT_ALPHA
+      );
+      const c = contrast(label, cell);
+      if (c < 4.5) bad.push(`${name} 对比度 ${c.toFixed(2)}`);
     }
     if (bad.length) throw new Error(bad.join('; '));
   });
 
-  test('节日渲染色之间可区分（最小 RGB 距离 ≥ 8）', () => {
-    // 防止"改成暖色但七个节日看起来都一样"的回归。
-    const names = ['元旦', '春节', '劳动节', '端午节', '中秋节', '国庆节'];
-    const pairs = [];
-    for (let i = 0; i < names.length; i += 1) {
-      for (let j = i + 1; j < names.length; j += 1) {
-        pairs.push([holiday.renderedTintDistance(names[i], names[j]), names[i], names[j]]);
-      }
-    }
-    pairs.sort((a, b) => a[0] - b[0]);
-    if (pairs[0][0] < 8) {
-      throw new Error(`最相似的两种节日差异仅 ${pairs[0][0].toFixed(1)}: ${pairs[0][1]}-${pairs[0][2]}`);
-    }
-  });
-
   test('合并节日名可按首项匹配（如"国庆节、中秋节"）', () => {
-    eq(holiday.holidayTint('国庆节、中秋节'), holiday.TINT['国庆节']);
-    eq(holiday.holidayTint('中秋节、国庆节'), holiday.TINT['中秋节']);
+    eq(holiday.holidayTint('国庆节、中秋节'), holiday.holidayTint('国庆节'));
+    eq(holiday.holidayTint('中秋节、国庆节'), holiday.holidayTint('中秋节'));
   });
 
-  test('holidayTint 未知节日回退到中性暖色且不与任何节日撞色', () => {
-    const fallback = holiday.holidayTint('不存在的节日');
-    eq(fallback, '246, 186, 96');
-    const clash = Object.values(holiday.TINT).filter((v) => v === fallback);
-    eq(clash.length, 0, '回退色不应等于某个节日的颜色');
-  });
-
-  test('isRenderedTintColdOrDim 判定基于合成后的颜色', () => {
-    // 清明节基准：允许冷色
-    eq(holiday.isRenderedTintColdOrDim('春节'), false, '春节应判为暖');
-    eq(holiday.isRenderedTintColdOrDim('国庆节'), false, '国庆应判为暖');
-    // 若把某节日改成纯绿，合成后仍应判为冷
-    const saved = holiday.TINT['春节'];
-    holiday.TINT['春节'] = '0, 200, 0';
-    eq(holiday.isRenderedTintColdOrDim('春节'), true, '纯绿应判为冷');
-    holiday.TINT['春节'] = saved;
+  test('未知节日归入冷色系，不额外增加颜色', () => {
+    eq(holiday.groupOf('不存在的节日'), 'cool');
+    eq(holiday.holidayTint('不存在的节日'), holiday.holidayTint('清明节'));
   });
 
   const passed = results.filter((r) => r.ok).length;

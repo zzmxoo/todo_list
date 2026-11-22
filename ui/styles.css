@@ -788,21 +788,19 @@ body.minimal-mode .add-row .add-input { font-size: 12px; }
 
 .cal-cell.today .cal-day { color: #fff; font-weight: 600; }
 
-/* 节日格先垫一层固定暖底，再叠 --hd。
-   否则 --hd 只会以 24% 覆盖在用户选的玻璃底色上，
-   冷色背景下所有节日都会渲染成同一种蓝紫，失去区分度。 */
+/* 节日格用极淡的单层叠色，不垫不透明底。
+   之前为了"让色相显示出来"加了一层 0.9 不透明的暖底，结果整块色块又重又脏，
+   连续 7 天会把视觉焦点从左侧待办清单抢走，比"今天"的白框还抢眼。
+   这里只在玻璃背景上叠 12% 的柔和色，靠明度微差和文字色区分即可。
+   透明度与 ui/domain/holiday.js 的 TINT_ALPHA 保持一致。 */
 .cal-cell.holiday {
-  background:
-    linear-gradient(rgba(var(--hd, 236, 170, 120), .24), rgba(var(--hd, 236, 170, 120), .24)),
-    linear-gradient(rgba(var(--hdb, 58, 34, 30), .9), rgba(var(--hdb, 58, 34, 30), .9));
-  box-shadow: inset 0 0 0 1px rgba(var(--hd, 236, 170, 120), 0.32);
+  background: rgba(var(--hd, 246, 193, 114), .12);
+  box-shadow: inset 0 0 0 1px rgba(var(--hd, 246, 193, 114), 0.18);
 }
 .cal-cell.holiday .cal-day { color: #ffe9e4; font-weight: 600; }
 .cal-cell.holiday.today {
-  background:
-    linear-gradient(rgba(var(--hd, 236, 170, 120), .30), rgba(var(--hd, 236, 170, 120), .30)),
-    linear-gradient(rgba(var(--hdb, 58, 34, 30), .92), rgba(var(--hdb, 58, 34, 30), .92));
-  box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.55), inset 0 0 0 2px rgba(var(--hd, 236, 170, 120), 0.4);
+  background: rgba(var(--hd, 246, 193, 114), .20);
+  box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.55), inset 0 0 0 2px rgba(var(--hd, 246, 193, 114), 0.28);
 }
 
 .cal-holiday {
