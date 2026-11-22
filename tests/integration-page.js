@@ -166,14 +166,14 @@
   click($('#calToday'));
   await sleep(200);
 
-  await t('[REG-01] 模块与名言库加载（1260 条、无重复）', async () => {
+  await t('[REG-01] 模块与名言库加载（1264 条、无重复）', async () => {
     ok(window.TodoCore && window.TodoDomain && window.CalendarDomain, 'domains');
     ok(window.HolidayDomain && window.QuoteDomain && window.WeatherAPI, 'domains2');
     const res = await fetch('quotes.json');
     const data = await res.json();
-    eq(data.quotes.length, 1260);
-    eq(new Set(data.quotes.map((q) => q.t)).size, 1260, 'unique quotes');
-    return '1260 quotes';
+    eq(data.quotes.length, 1264);
+    eq(new Set(data.quotes.map((q) => q.t)).size, 1264, 'unique quotes');
+    return '1264 quotes';
   });
 
   await t('[REG-39] 名言库不含贬义 / 嘲讽 / 粗俗语句', async () => {

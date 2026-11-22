@@ -121,7 +121,7 @@
     `https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`;
   // 节日底色等纯规则集中在 ui/domain/holiday.js（HolidayDomain.holidayTint）
 
-  // 每日一句：内置 1260 条中外名言/格言/谚语，随机展示，不需要联网
+  // 每日一句：内置 1264 条中外名言/格言/谚语，随机展示，不需要联网
   const QUOTE_SEED_URL = "quotes.json";
 
   // 悬停日期时随机展示一句，全部选用公版古籍、诗词与常见谚语
