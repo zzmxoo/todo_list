@@ -226,6 +226,8 @@
   // 单击弹出后的停留时长：弹框可能出现在光标上方，需要足够时间移过去。
   // 悬停触发（光标已在格子上）用 INFO_HIDE_DELAY 即可。
   const INFO_CLICK_HOLD = 3000;
+  // 单击弹出的弹框在光标经过其它日期格时要保持，不能像悬停那样被替换掉。
+  let infoPinned = false;
   let lastQuoteIndex = -1;
   let networkOk = null;
   let calPress = null;
@@ -2016,6 +2018,7 @@
     cellHoverTimer = null;
     cancelInfoHide();
     hoverCell = null;
+    infoPinned = false;
     if (els.calInfo) els.calInfo.hidden = true;
   }
 
@@ -2733,6 +2736,10 @@
     els.calGrid.addEventListener("mouseover", (event) => {
       const cell = event.target.closest(".cal-cell");
       if (!cell) return;
+      // 单击弹出的弹框是「固定」的：光标从该格移向弹框时必然经过其它格子，
+      // 固定期间经过任何格子都保持现状——既不关闭，也不启动新的悬停计时。
+      // 弹框自身的计时器负责超时关闭；移到弹框上会被 mouseenter 取消计时。
+      if (infoPinned) return;
       cancelInfoHide();
       if (cell === hoverCell) return;
       hideCalInfo();
@@ -2756,10 +2763,16 @@
         cancelInfoHide();
         return;
       }
+      // 单击弹出的弹框已按 INFO_CLICK_HOLD 计时，离开触发格不重置它
+      if (infoPinned) return;
       scheduleHideCalInfo();
     });
 
-    els.calGrid.addEventListener("mouseleave", () => scheduleHideCalInfo());
+    els.calGrid.addEventListener("mouseleave", () => {
+      // 同上：固定弹框由自己的计时器负责关闭
+      if (infoPinned) return;
+      scheduleHideCalInfo();
+    });
     // 按下时先不关闭弹框：左键既要拖动窗口又要支持单击查看，
     // 等 mouseup 判断是「点击」还是「拖动」后再决定。
 
@@ -2810,6 +2823,7 @@
       if (!yy || !mm || !dd) return;
       hideCalInfo();
       hoverCell = press.cell;
+      infoPinned = true;
       showCalInfo(press.cell, new Date(yy, mm - 1, dd));
       // 单击后给足时间把光标移到弹框上；移上去后 mouseenter 会取消这个计时
       scheduleHideCalInfo(INFO_CLICK_HOLD);

@@ -714,6 +714,18 @@
     await sleep(2000);
     ok(!info.hidden, 'still visible at 2s (enough time to reach the popup)');
 
+    // 关键回归：光标经过其它日期格时弹框不能立即消失
+    // （旧实现 mouseover 里无条件 hideCalInfo，光标从 19 号移向弹框
+    //   途中经过 18 号就会把弹框干掉）
+    const other = cells.find((c) => c !== cell && !c.classList.contains('other-month'));
+    ok(other, 'another cell to pass over');
+    other.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    await sleep(120);
+    ok(!info.hidden, 'stays visible when cursor passes over another cell');
+    other.dispatchEvent(
+      new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })
+    );
+
     // 光标移到弹框上：保持显示，不再自动关闭
     info.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
     await sleep(4000);
