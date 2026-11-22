@@ -24,7 +24,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 
 | 编号 | 问题 / 行为 | 相关提交 | 用例 |
 | --- | --- | --- | --- |
-| REG-01 | 模块加载、名言库 1427 条且无重复 | ab2aae8 | 模块与名言库加载 |
+| REG-01 | 模块加载、名言库 1361 条且无重复 | ab2aae8 | 模块与名言库加载 |
 | REG-02 | 已完成待办不再出现在列表，计数与列表一致 | 长期行为 | 已完成待办从列表隐藏且计数正确 |
 | REG-03 | 新增 / 置顶 / 编辑 / 删除待办 | ab2aae8 | 新增 / 置顶 / 编辑 / 删除待办 |
 | REG-04 | 后台跨天刷新不能清空正在输入的待办草稿 | 955503f | 输入中的待办草稿不会被后台重绘清空 |
@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | 节日配色（REG-37） | 底色整体偏暖、明度充足，清明节豁免冷色；未知节日回退节庆红 | 本次修复 | `unit-domain.js` |
 | 网络错误分类 | Rust 网络错误统一加 `NET_ERR` 前缀；HTTP 4xx 不标记为断网、5xx/429 可重试 | 本次修复 | `src-tauri/src/main.rs` mod tests |
 | 天气适配 | 和风 / 彩云 / uapis 链接识别与字段归一 | 4b376d1 | `unit-weather.js` |
-| 名言数据 | 1427 条、无重复、长度与出处完整 | ab2aae8 | `regression.ps1` QUOTES 校验 |
+| 名言数据 | 1361 条、无重复、长度与出处完整 | ab2aae8 | `regression.ps1` QUOTES 校验 |
 
 ## 无法完全自动化的部分（人工抽查）
 

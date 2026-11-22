@@ -114,7 +114,7 @@ fetch('quotes.json')
 '@
     $quotes = (Eval-Expr $quotesExpr) | ConvertFrom-Json
     "QUOTES total=$($quotes.total) unique=$($quotes.unique) dup=$($quotes.dup) badLen=$($quotes.badLen) badAuthor=$($quotes.badAuthor)"
-    if ($quotes.total -eq 1427 -and $quotes.dup -eq 0 -and $quotes.badLen -eq 0 -and $quotes.badAuthor -eq 0) {
+    if ($quotes.total -eq 1361 -and $quotes.dup -eq 0 -and $quotes.badLen -eq 0 -and $quotes.badAuthor -eq 0) {
       $passed += 1
     } else {
       $failed += 1

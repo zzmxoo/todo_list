@@ -121,7 +121,7 @@
     `https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`;
   // 节日底色等纯规则集中在 ui/domain/holiday.js（HolidayDomain.holidayTint）
 
-  // 每日一句：内置 1427 条中外名言/格言/谚语，随机展示，不需要联网
+  // 每日一句：内置 1361 条中外名言/格言/谚语，随机展示，不需要联网
   const QUOTE_SEED_URL = "quotes.json";
 
   // 悬停日期时随机展示一句，全部选用公版古籍、诗词与常见谚语
@@ -2756,7 +2756,8 @@
     });
 
     els.calGrid.addEventListener("mouseleave", () => scheduleHideCalInfo());
-    els.calGrid.addEventListener("pointerdown", () => hideCalInfo());
+    // 按下时先不关闭弹框：左键既要拖动窗口又要支持单击查看，
+    // 等 mouseup 判断是「点击」还是「拖动」后再决定。
 
     // 右键单击日期格：不等待，立即显示日期信息
     els.calGrid.addEventListener("contextmenu", (event) => {
@@ -2774,13 +2775,14 @@
     els.calInfo.addEventListener("mouseenter", () => cancelInfoHide());
     els.calInfo.addEventListener("mouseleave", () => scheduleHideCalInfo());
 
-    // 日期格自定义拖动：移动超过 4px 才拖动窗口，避免吞掉双击
+    // 日期格自定义拖动：移动超过 4px 才拖动窗口，避免吞掉双击。
+    // 原地按下再抬起则视为单击，用于查看该日期的农历 / 格言弹框。
     els.calGrid.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       if (event.target.closest(".cal-bar")) return;
       const cell = event.target.closest(".cal-cell");
       if (!cell) return;
-      calPress = { x: event.clientX, y: event.clientY };
+      calPress = { x: event.clientX, y: event.clientY, cell };
     });
 
     window.addEventListener("mousemove", (event) => {
@@ -2796,7 +2798,17 @@
     });
 
     window.addEventListener("mouseup", () => {
+      const press = calPress;
       calPress = null;
+      // 未移动即抬起 = 单击日期格：立即弹出该日信息
+      if (!press || !press.cell || !press.cell.dataset.date) return;
+      const [yy, mm, dd] = press.cell.dataset.date.split("-").map(Number);
+      if (!yy || !mm || !dd) return;
+      hideCalInfo();
+      hoverCell = press.cell;
+      showCalInfo(press.cell, new Date(yy, mm - 1, dd));
+      // 光标若不在弹框上，按既有超时自动关闭
+      scheduleHideCalInfo();
     });
   }
 

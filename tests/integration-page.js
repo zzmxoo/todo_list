@@ -166,14 +166,14 @@
   click($('#calToday'));
   await sleep(200);
 
-  await t('[REG-01] 模块与名言库加载（1427 条、无重复）', async () => {
+  await t('[REG-01] 模块与名言库加载（1361 条、无重复）', async () => {
     ok(window.TodoCore && window.TodoDomain && window.CalendarDomain, 'domains');
     ok(window.HolidayDomain && window.QuoteDomain && window.WeatherAPI, 'domains2');
     const res = await fetch('quotes.json');
     const data = await res.json();
-    eq(data.quotes.length, 1427);
-    eq(new Set(data.quotes.map((q) => q.t)).size, 1427, 'unique quotes');
-    return '1427 quotes';
+    eq(data.quotes.length, 1361);
+    eq(new Set(data.quotes.map((q) => q.t)).size, 1361, 'unique quotes');
+    return '1361 quotes';
   });
 
   await t('[REG-39] 名言库不含贬义 / 嘲讽 / 粗俗语句', async () => {
@@ -194,6 +194,41 @@
       /小人记仇/,
       /虚伪的朋友，遇事常点头哈腰/,
       /奸诈的聪明人/,
+      // 用户第二轮指出的消极/讽刺/贬损语句
+      /好心不得好报|好心认做驴肝肺|狼肚子里没有好心肝/,
+      /满口仁义道德，一肚子男盗女娼/,
+      /世无英雄，竖子成名/,
+      /四肢发达，头脑简单/,
+      /猫哭老鼠|春风吹不入驴的耳朵/,
+      /为人作保，灾祸临头/,
+      /今日有酒今朝醉/,
+      /少数人常常被证明是对的/,
+      /聪明反被聪明误|聪明一世，糊涂一时/,
+      /愚者永远把自己的判断|愚蠢人心在嘴上|使愚昧者更愚蠢/,
+      /道德上的矮子/,
+      /懒牛屎尿多/,
+      /丈母娘看女婿/,
+      /做事一错，补过无及/,
+      /早恋是这样一种果实/,
+      /人生之不如意十之八九/,
+      /贫困会中断友谊/,
+      /希望是厄运的忠实的姐妹|希望是永远达不到的/,
+      /金钱是无底的大海/,
+      /道德上的完全麻痹|良心的完全麻痹/,
+      /人老了丑，树老了朽/,
+      /世事茫茫如大海/,
+      /不怕该债的精穷/,
+      /憨厚朴实有碍事业的成功/,
+      /一分钱难倒英雄汉/,
+      /知识愈浅，自信愈深/,
+      /英雄不怕战，只怕中暗箭/,
+      /做事不为东，累死也无功/,
+      /懒惰的人，吊死在苹果树下/,
+      /为朋友而死不难/,
+      /精力充沛的青春，是不怎么容易灭亡的/,
+      /太多，就是不健康/,
+      /使心用心/,
+      /渐进思想是创新的最大敌人/,
     ];
     const hits = data.quotes.filter((q) => bad.some((re) => re.test(q.t)));
     if (hits.length) {
@@ -649,6 +684,45 @@
     await sleep(800);
     ok($('#calInfo').hidden, 'hidden after 1.4s');
     return 'ok';
+  });
+
+  await t('[REG-40] 单击日期格弹出信息，光标不留在弹框上则超时关闭', async () => {
+    // 需求：单击日期格即时弹出农历/格言；与拖动窗口共用左键，
+    // 需靠位移阈值区分。弹出后若光标不悬停在弹框上，按既有 1.2s 超时关闭。
+    // showCalInfo 在网络失败时会直接 return，先确认环境允许弹框。
+    const info = $('#calInfo');
+    info.hidden = true;
+    const cells = $$('.cal-cell');
+    const cell = cells.find((c) => !c.classList.contains('other-month') && c.dataset.date);
+    ok(cell, 'a date cell');
+    // 探针：构造一次 contextmenu（右键总是立即显示），确认弹框机制可用
+    cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await sleep(120);
+    if (info.hidden) return 'skip: network unavailable, popup disabled';
+    info.hidden = true;
+    const rect = cell.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+
+    // 模拟真实的按下→抬起（不移动），应视为单击而非拖动
+    cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
+    await sleep(150);
+    ok(!info.hidden, 'click shows info immediately');
+
+    // 光标不在弹框上：应在既有超时后自动关闭
+    await sleep(1600);
+    ok(info.hidden, 'auto-hidden after timeout when not hovering popup');
+
+    // 拖动超过阈值不应弹出
+    info.hidden = true;
+    cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+    window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: x + 20, clientY: y + 20 }));
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x + 20, clientY: y + 20 }));
+    await sleep(200);
+    ok(info.hidden, 'drag must not show info');
+    info.hidden = true;
+    return 'click shows, drag does not';
   });
 
   await t('[REG-19] 节气当天显示节气名与背景', async () => {
