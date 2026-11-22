@@ -81,6 +81,36 @@
     if (wrong.length) throw new Error(wrong.join('; '));
   });
 
+  test('节日配色不使用红色系', () => {
+    // 需求：不要红色系。红色区间取色相 345°–15°（含正红、品红边），
+    // 常量与渲染后都要检查——透明叠色会把红色往底色方向拉，两个都看更稳。
+    const hueOf = (text) => {
+      const [r, g, b] = text.split(',').map((n) => Number(n.trim()) / 255);
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      if (d === 0) return 0;
+      let h;
+      if (max === r) h = 60 * (((g - b) / d) % 6);
+      else if (max === g) h = 60 * ((b - r) / d + 2);
+      else h = 60 * ((r - g) / d + 4);
+      return h < 0 ? h + 360 : h;
+    };
+    const isRed = (h) => h <= 15 || h >= 345;
+    const bad = [];
+    for (const name of Object.keys(holiday.TINT)) {
+      if (name === '清明节') continue; // 竹青，本就不是红色
+      const raw = holiday.holidayTint(name);
+      const rendered = holiday.composite(raw, holiday.holidayBase(name), holiday.TINT_ALPHA);
+      const renderedText = rendered ? rendered.join(', ') : '';
+      const h1 = hueOf(raw);
+      const h2 = renderedText ? hueOf(renderedText) : h1;
+      if (isRed(h1)) bad.push(`${name} 常量色相 ${Math.round(h1)}° 偏红`);
+      if (isRed(h2)) bad.push(`${name} 渲染色相 ${Math.round(h2)}° 偏红`);
+    }
+    if (bad.length) throw new Error(bad.join('; '));
+  });
+
   test('节日渲染色之间可区分（最小 RGB 距离 ≥ 8）', () => {
     // 防止"改成暖色但七个节日看起来都一样"的回归。
     const names = ['元旦', '春节', '劳动节', '端午节', '中秋节', '国庆节'];
@@ -103,7 +133,7 @@
 
   test('holidayTint 未知节日回退到中性暖色且不与任何节日撞色', () => {
     const fallback = holiday.holidayTint('不存在的节日');
-    eq(fallback, '236, 170, 120');
+    eq(fallback, '246, 186, 96');
     const clash = Object.values(holiday.TINT).filter((v) => v === fallback);
     eq(clash.length, 0, '回退色不应等于某个节日的颜色');
   });
