@@ -451,6 +451,7 @@
     els.minimalSwitch = document.getElementById("minimalSwitch");
     els.topSwitch = document.getElementById("topSwitch");
     els.cityInput = document.getElementById("cityInput");
+    els.locateHint = document.getElementById("locateHint");
     els.weatherApiInput = document.getElementById("weatherApiInput");
     els.locateBtn = document.getElementById("locateBtn");
     els.quitBtn = document.getElementById("quitBtn");
@@ -1691,6 +1692,22 @@
   }
 
   /* ----------------------------------------------------------- weather */
+  /**
+   * 定位失败时在设置面板里给出明确提示，并把光标放到输入框，
+   * 让用户可以直接手输城市（而不是只有天气卡底部一行小字）。
+   */
+  function setLocateHint(message) {
+    if (!els.locateHint) return;
+    els.locateHint.textContent = message || "";
+    els.locateHint.hidden = !message;
+    if (message) {
+      els.locateHint.classList.add("warn");
+      if (els.cityInput) els.cityInput.focus();
+    } else {
+      els.locateHint.classList.remove("warn");
+    }
+  }
+
   function setWcStatus(message) {
     els.wcStatus.textContent = message || "";
   }
@@ -1733,8 +1750,10 @@
       const city = (s.city || "").trim();
       const needsGeo = !custom || /\{lat\}|\{lon\}/.test(custom);
       if (needsGeo) {
-        if (!city) throw new Error("请先在设置中填写城市");
-        if (s.latitude == null || s.longitude == null) {
+        // 已有坐标（定位得到的）时不需要城市名，城市名稍后由反查补上
+        const hasCoords = s.latitude != null && s.longitude != null;
+        if (!city && !hasCoords) throw new Error("请先在设置中填写城市");
+        if (!hasCoords) {
           const first = await geocodeCity(city);
           s.latitude = first.latitude;
           s.longitude = first.longitude;
@@ -1794,14 +1813,14 @@
       els.wcCond.textContent = "获取中…";
       els.wcHilo.textContent = "";
       els.wcExtra.textContent = "";
-      els.wcCity.textContent = state.settings.city || "";
+      els.wcCity.textContent = state.settings.city || "定位中…";
       els.wcIcon.innerHTML = "";
       els.forecast.innerHTML = "";
       return;
     }
     const current = data.current || {};
     const info = wmoInfo(current.code);
-    els.wcCity.textContent = data.city || state.settings.city || "";
+    els.wcCity.textContent = data.city || state.settings.city || "定位中…";
     els.wcIcon.innerHTML = wxIcon(info.kind, 42);
     els.wcTemp.textContent = `${current.temp ?? "--"}°`;
     els.wcCond.textContent = info.text;
@@ -2436,6 +2455,7 @@
     state.settings.latitude = null;
     state.settings.longitude = null;
     state.weather = null;
+    setLocateHint(""); // 用户已手动指定城市，定位失败的提示不再需要
     save();
     setWcStatus("正在获取天气…");
     updateWeatherPillState();
@@ -2443,20 +2463,96 @@
     await refreshWeather();
   }
 
+  /**
+   * 定位。优先用 IP 定位：一次请求同时拿到城市名和经纬度，
+   * 不需要「先 GPS 授权、再反查城市名」两跳，也不依赖长期不可靠的逆地理编码。
+   * 拿到 IP 结果后，若浏览器支持定位且在授权中，再尝试用 GPS 提升精度。
+   */
   function locate() {
+    const applyCity = (name) => {
+      state.settings.city = name;
+      els.cityInput.value = name;
+      if (state.weather) state.weather.city = name;
+      save();
+      if (state.settings.weather_open) renderWeatherCard();
+      renderWeatherPill();
+      setLocateHint("");
+    };
+
+    setWcStatus("正在定位…");
+    setLocateHint("");
+    els.cityInput.value = "定位中…";
+
+    (async () => {
+      // 1) 依次尝试多个 IP 定位服务，任一成功即可
+      for (const source of window.WeatherAPI.IP_LOCATE_SOURCES) {
+        try {
+          const data = await invoke("fetch_json", { url: source.url });
+          const name = String(source.city(data) || "").trim();
+          const [rawLat, rawLon] = source.coords(data);
+          const coords = window.WeatherAPI.pickCoords({ latitude: rawLat, longitude: rawLon });
+          if (name && coords) {
+            state.settings.latitude = coords.lat;
+            state.settings.longitude = coords.lon;
+            applyCity(name);
+            setWcStatus("");
+            refreshWeather();
+            // 2) GPS 仅用于提升坐标精度，失败不影响已有结果
+            refineWithGps();
+            return;
+          }
+        } catch (err) {
+          console.warn(`ip locate failed (${source.name})`, err);
+        }
+      }
+      // 3) 所有 IP 服务都失败 → 退回 GPS
+      useGps();
+    })();
+  }
+
+  /** 用 GPS 提升坐标精度。已有城市名时只更新坐标，不改城市名。 */
+  function refineWithGps() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        // 坐标变化很小就不必重拉天气
+        if (
+          Math.abs(Number(state.settings.latitude) - lat) < 0.01 &&
+          Math.abs(Number(state.settings.longitude) - lon) < 0.01
+        ) {
+          return;
+        }
+        state.settings.latitude = lat;
+        state.settings.longitude = lon;
+        save();
+        refreshWeather();
+      },
+      () => {
+        /* GPS 只是精度补充，失败静默忽略 */
+      },
+      { timeout: 8000, maximumAge: 600000 }
+    );
+  }
+
+  /** IP 定位不可用时退回：GPS 拿坐标，再反查城市名。 */
+  function useGps() {
+    const fail = (msg) => {
+      setWcStatus(msg);
+      setLocateHint(msg + "。可在下方直接输入城市名，或检查 Windows「设置 → 隐私和安全性 → 定位」是否已开启。");
+      els.cityInput.value = state.settings.city || "";
+    };
     if (!navigator.geolocation) {
-      setWcStatus("当前环境不支持定位，请直接输入城市");
+      fail("当前环境不支持定位");
       return;
     }
-    setWcStatus("正在定位…");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
         state.settings.latitude = lat;
         state.settings.longitude = lon;
-        state.settings.city = "当前位置";
-        els.cityInput.value = "当前位置";
         save();
         if (state.settings.weather_open) renderWeatherCard();
         refreshWeather();
@@ -2464,32 +2560,44 @@
       },
       (err) => {
         console.warn(err);
-        setWcStatus("定位失败，请直接输入城市");
+        fail("定位失败");
       },
       { timeout: 8000, maximumAge: 600000 }
     );
   }
 
-  /** 根据定位坐标反查城市名，避免天气卡片只显示「当前位置」。 */
+  /**
+   * 根据定位坐标反查城市名，避免天气卡片只显示「当前位置」。
+   * 依次尝试多个逆地理编码服务（BigDataCloud 优先，nominatim 兜底）。
+   */
   async function resolveCityName(lat, lon) {
     try {
-      const url =
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
-        `&lat=${lat}&lon=${lon}&zoom=10&addressdetails=1&accept-language=zh-CN`;
-      const data = await invoke("fetch_json", { url });
-      const address = data.address || {};
-      const parts = String(data.display_name || "").split(",").map((part) => part.trim());
-      const cityPart = parts.find((part) => /(市|自治州|地区|盟)$/.test(part));
-      const name = String(
-        cityPart || address.city || address.town || address.municipality || address.county || address.state || data.name || ""
-      ).trim();
-      if (!name) return;
+      let name = "";
+      for (const source of window.WeatherAPI.REVERSE_SOURCES) {
+        try {
+          const data = await invoke("fetch_json", { url: source.url(lat, lon) });
+          name = String(source.city(data) || "").trim();
+          if (name) break;
+        } catch (err) {
+          console.warn(`reverse geocode failed (${source.name})`, err);
+        }
+      }
       // 用户可能在请求期间手动改了城市，此时不要覆盖。
       if (
-        state.settings.city !== "当前位置" ||
         Number(state.settings.latitude) !== lat ||
-        Number(state.settings.longitude) !== lon
+        Number(state.settings.longitude) !== lon ||
+        (state.settings.city && state.settings.city !== "定位中")
       ) {
+        return;
+      }
+      if (!name) {
+        // 坐标拿到了但所有反查服务都失败：保留占位，并提示可手动输入
+        state.settings.city = "当前位置";
+        els.cityInput.value = "";
+        if (state.weather) state.weather.city = "当前位置";
+        save();
+        renderWeatherCard();
+        setLocateHint("已获取位置坐标，但无法识别城市名称。请直接输入城市名。");
         return;
       }
       state.settings.city = name;

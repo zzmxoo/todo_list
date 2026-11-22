@@ -747,6 +747,144 @@
     return 'holds 2s+, stays while hovered, drag does not show';
   });
 
+  await t('[REG-41] 定位后应显示城市名而不是「当前位置」', async () => {
+    // 旧问题：逆地理编码用的 nominatim.openstreetmap.org 长期超时（实测 12s 无响应），
+    // 反查永远失败，城市名一直停在「当前位置」。改用 BigDataCloud。
+    // 这里直接验证解析逻辑，不依赖外网。
+    const pick = window.WeatherAPI && window.WeatherAPI.pickCityFromReverse;
+    ok(pick, 'pickCityFromReverse exposed');
+    // BigDataCloud 真实响应结构
+    eq(pick({
+      city: '杭州市',
+      principalSubdivision: '浙江省',
+      locality: '拱墅區',
+      countryName: '中华人民共和国',
+    }), '杭州市', 'prefer city');
+    // 没有 city 时回退到省份
+    eq(pick({ principalSubdivision: '浙江省', locality: '拱墅區' }), '浙江省', 'fallback to province');
+    // 都没有则返回空，调用方保留原值
+    eq(pick({ countryName: '中华人民共和国' }), '', 'no city -> empty');
+    eq(pick(null), '', 'null safe');
+    return 'city name resolved';
+  });
+
+  await t('[REG-42] IP 定位可独立提供城市名与坐标', async () => {
+    // 需求：逆地理编码长期不可靠，改用 IP 定位作为主路径——它一次返回
+    // 城市名 + 经纬度，不再需要「先 GPS 再反查」两跳。
+    const ipUrl = window.WeatherAPI && window.WeatherAPI.ipLocateUrl;
+    ok(ipUrl, 'ipLocateUrl exposed');
+    ok(ipUrl.startsWith('https://'), 'must be https (CSP + 隐私)');
+
+    const pick = window.WeatherAPI.pickCityFromReverse;
+    // IP 定位响应结构与 reverse 一致，同一解析函数复用
+    eq(pick({ city: '杭州市', principalSubdivision: '浙江省' }), '杭州市', 'city');
+
+    // 坐标解析：字符串/数字都要能用
+    const coords = window.WeatherAPI.pickCoords;
+    ok(coords, 'pickCoords exposed');
+    const c1 = coords({ latitude: 30.28, longitude: 120.22 });
+    eq(c1 && c1.lat, 30.28, 'numeric coords');
+    const c2 = coords({ latitude: '30.28', longitude: '120.22' });
+    eq(c2 && c2.lat, 30.28, 'string coords');
+    eq(coords({}), null, 'missing coords -> null');
+    eq(coords({ latitude: 91, longitude: 0 }), null, 'out of range -> null');
+    return 'ip locate helpers ok';
+  });
+
+  await t('[REG-43] 定位有多路备用服务（IP 定位 + 逆地理编码）', async () => {
+    // 需求：单一服务总有挂的时候，要能换一个再试。
+    const W = window.WeatherAPI;
+    const ip = W.IP_LOCATE_SOURCES;
+    ok(Array.isArray(ip), 'ip sources');
+    ok(ip.length >= 2, 'at least 2 ip sources, got ' + ip.length);
+    for (const s of ip) {
+      ok(s.name, 'ip source name');
+      ok(/^https?:\/\//.test(s.url), s.name + ' has url');
+      ok(typeof s.city === 'function', s.name + ' city extractor');
+      ok(typeof s.coords === 'function', s.name + ' coords extractor');
+    }
+
+    // 逆地理编码也保留多路：nominatim 长期不可用，但仍作为兜底存在
+    const rev = W.REVERSE_SOURCES;
+    ok(Array.isArray(rev), 'reverse sources');
+    ok(rev.length >= 2, 'at least 2 reverse sources, got ' + rev.length);
+    ok(rev.some((s) => s.name === 'nominatim'), 'nominatim kept as fallback');
+    for (const s of rev) {
+      ok(typeof s.url === 'function', s.name + ' reverse url builder');
+      const u = s.url(30.28, 120.22);
+      ok(u.includes('30.28') && u.includes('120.22'), s.name + ' embeds coords');
+      ok(typeof s.city === 'function', s.name + ' reverse city extractor');
+    }
+
+    // 各服务解析器能吃自己的响应结构
+    const bdc = ip.find((s) => s.name === 'bigdatacloud');
+    if (bdc) {
+      eq(bdc.city({ city: '杭州市', principalSubdivision: '浙江省' }), '杭州市', 'bdc city');
+    }
+    const ipapi = ip.find((s) => s.name === 'ip-api');
+    if (ipapi) {
+      eq(ipapi.city({ status: 'success', city: '杭州', regionName: '浙江' }), '杭州', 'ip-api city');
+      eq(ipapi.city({ status: 'fail' }), '', 'ip-api failure -> empty');
+    }
+    const nomi = rev.find((s) => s.name === 'nominatim');
+    if (nomi) {
+      eq(
+        nomi.city({ display_name: '拱墅区, 杭州市, 浙江省, 中国', address: {} }),
+        '杭州市',
+        'nominatim extracts city'
+      );
+    }
+    return `ip=${ip.map((s) => s.name).join(',')} reverse=${rev.map((s) => s.name).join(',')}`;
+  });
+
+  await t('[REG-44] 定位失败时在设置面板提示并可手动输入城市', async () => {
+    // 需求：定位失败（IP 全挂、GPS 未授权/系统定位关闭）时，
+    // 不能只在天气卡底部显示一行小字——要在设置面板的城市输入框下方
+    // 明确提示，并让用户能直接输入城市名。
+    await openSettingsTab(2); // 天气页
+    const hint = $('#locateHint');
+    const input = $('#cityInput');
+    ok(hint, 'locate hint element exists');
+    ok(input, 'city input exists');
+
+    // 初始应为隐藏
+    ok(hint.hidden, 'hint hidden by default');
+
+    // 模拟所有定位渠道失败：拦截 fetch_json
+    const realInvoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+    window.__TEST_INVOKE = function (cmd, args) {
+      if (cmd === 'fetch_json' && /bigdatacloud|ipwho|ip-api/.test((args && args.url) || '')) {
+        return Promise.reject(new Error('NET_ERR:连接失败'));
+      }
+      return realInvoke(cmd, args);
+    };
+    try {
+      // 没有 geolocation 就不会走 GPS，直接触发失败路径
+      const savedGeo = navigator.geolocation;
+      try {
+        Object.defineProperty(navigator, 'geolocation', { value: undefined, configurable: true });
+      } catch (e) {
+        /* 不可改写则跳过本用例 */
+        return 'skip: geolocation not overridable';
+      }
+      click($('#locateBtn'));
+      const shown = await waitFor(() => !hint.hidden, 8000, 200);
+      ok(shown >= 0, 'hint shown after locate failure');
+      ok(hint.textContent.includes('输入城市'), 'hint tells user to type a city: ' + hint.textContent);
+
+      // 手动输入城市仍可用
+      input.value = '北京';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(2500);
+      ok(hint.hidden || !hint.textContent, 'hint cleared after manual input');
+      Object.defineProperty(navigator, 'geolocation', { value: savedGeo, configurable: true });
+      return 'hint shown and cleared';
+    } finally {
+      window.__TEST_INVOKE = null;
+      await closeSettings();
+    }
+  });
+
   await t('[REG-19] 节气当天显示节气名与背景', async () => {
     const reached = await goMonth(2026, 11);
     if (!reached) return 'skip: month not reachable';

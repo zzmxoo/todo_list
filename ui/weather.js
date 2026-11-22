@@ -311,7 +311,94 @@
     return loadAuto(url, ctx, fetchJson);
   }
 
+  /**
+   * 从 BigDataCloud reverse-geocode-client 的响应里取城市名。
+   * 依次尝试 city / principalSubdivision（省级）/ locality，都没有则返回空串，
+   * 由调用方保留原值。
+   */
+  function pickCityFromReverse(data) {
+    if (!data || typeof data !== "object") return "";
+    const candidates = [data.city, data.principalSubdivision, data.locality];
+    for (const value of candidates) {
+      const name = String(value || "").trim();
+      if (name) return name;
+    }
+    return "";
+  }
+
+  /**
+   * IP 定位服务列表，按可靠性与准确性排序，调用方依次尝试直到成功。
+   * 都不需要 API Key。
+   * - bigdatacloud：实测判断最准（与真实位置一致），但较慢
+   * - ip-api：最快（约 1s）且准确，仅有 HTTP 端点（免费版不支持 HTTPS）
+   * - ipwho.is：HTTPS 且快，但 IP 库精度较差（实测偏差数百公里），兜底用
+   */
+  const IP_LOCATE_SOURCES = [
+    {
+      name: "bigdatacloud",
+      url: "https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=zh",
+      city: (d) => d.city || d.principalSubdivision || d.locality,
+      coords: (d) => [d.latitude, d.longitude],
+    },
+    {
+      name: "ip-api",
+      url: "http://ip-api.com/json/?lang=zh-CN&fields=status,city,regionName,lat,lon",
+      city: (d) => (d.status === "fail" ? "" : d.city || d.regionName),
+      coords: (d) => [d.lat, d.lon],
+    },
+    {
+      name: "ipwho.is",
+      url: "https://ipwho.is/?lang=zh-CN",
+      city: (d) => (d.success === false ? "" : d.city || d.region),
+      coords: (d) => [d.latitude, d.longitude],
+    },
+  ];
+
+  /**
+   * 逆地理编码服务（坐标 -> 城市名），用于 GPS 路径。
+   * nominatim 长期不可用但保留作为兜底：万一其他渠道都失效时仍有得试。
+   */
+  const REVERSE_SOURCES = [
+    {
+      name: "bigdatacloud",
+      url: (lat, lon) =>
+        `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+        `?latitude=${lat}&longitude=${lon}&localityLanguage=zh`,
+      city: (d) => d.city || d.principalSubdivision || d.locality,
+    },
+    {
+      name: "nominatim",
+      url: (lat, lon) =>
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2` +
+        `&lat=${lat}&lon=${lon}&zoom=10&addressdetails=1&accept-language=zh-CN`,
+      city: (d) => {
+        const parts = String(d.display_name || "").split(",").map((p) => p.trim());
+        const hit = parts.find((p) => /(市|自治州|地区|盟)$/.test(p));
+        const addr = d.address || {};
+        return hit || addr.city || addr.town || addr.municipality || addr.county || addr.state || d.name;
+      },
+    },
+  ];
+
+  /** 兼容旧调用点：默认第一个服务的地址。 */
+  const ipLocateUrl = IP_LOCATE_SOURCES[0].url;
+
+  /** 从响应里取经纬度；缺失或越界返回 null。 */
+  function pickCoords(data) {
+    if (!data || typeof data !== "object") return null;
+    const lat = Number(data.latitude);
+    const lon = Number(data.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat, lon };
+  }
+
   return {
+    pickCityFromReverse,
+    pickCoords,
+    ipLocateUrl,
+    IP_LOCATE_SOURCES,
+    REVERSE_SOURCES,
     detectProvider,
     detectPayload,
     fromQWeatherIcon,
