@@ -119,14 +119,17 @@
   // 中国法定节假日：NateScarlet/holiday-cn 每年发布一份 JSON，包含放假与调休
   const HOLIDAY_URL = (year) =>
     `https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`;
+  // 节日底色：整体偏暖、明度偏高，避免冷色与压抑感。
+  // 清明节是唯一例外，保留清冷的竹青以贴合节气氛围。
+  // 色相均落在红/橙/金区间（0°–40°），与深色卡片背景对比度 ≥ 4.4。
   const HOLIDAY_TINT = {
-    元旦: "88, 142, 255",
-    春节: "236, 86, 86",
-    清明节: "82, 186, 138",
-    劳动节: "238, 152, 64",
-    端午节: "56, 176, 168",
-    中秋节: "230, 174, 72",
-    国庆节: "232, 96, 92",
+    元旦: "255, 138, 128",   // 珊瑚粉，新年
+    春节: "255, 107, 107",   // 明快朱红
+    清明节: "122, 200, 168", // 竹青（冷色豁免）
+    劳动节: "255, 168, 84",  // 暖橙，活力
+    端午节: "255, 190, 92",  // 金黄偏橙
+    中秋节: "255, 207, 112", // 月华金
+    国庆节: "255, 122, 112", // 节庆红
   };
 
   // 每日一句：内置 1460 条中外名言/格言/谚语，随机展示，不需要联网
@@ -2224,7 +2227,7 @@
           cell.classList.add("holiday");
           cell.dataset.holiday = holidayName;
           cell.title = holidayName;
-          cell.style.setProperty("--hd", HOLIDAY_TINT[holidayName] || "232, 96, 92");
+          cell.style.setProperty("--hd", HOLIDAY_TINT[holidayName] || "255, 122, 112");
         }
 
         const day = document.createElement("span");
@@ -3104,4 +3107,7 @@
   }
 
   document.addEventListener("DOMContentLoaded", boot);
+
+  // 测试钩子：暴露节日配色表，供回归用例校验色相与明度（生产环境只读常量）。
+  window.HolidayTint = HOLIDAY_TINT;
 })();

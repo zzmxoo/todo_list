@@ -789,13 +789,13 @@ body.minimal-mode .add-row .add-input { font-size: 12px; }
 .cal-cell.today .cal-day { color: #fff; font-weight: 600; }
 
 .cal-cell.holiday {
-  background: rgba(var(--hd, 232, 96, 92), 0.16);
-  box-shadow: inset 0 0 0 1px rgba(var(--hd, 232, 96, 92), 0.2);
+  background: rgba(var(--hd, 255, 122, 112), 0.16);
+  box-shadow: inset 0 0 0 1px rgba(var(--hd, 255, 122, 112), 0.2);
 }
 .cal-cell.holiday .cal-day { color: #ffe9e4; font-weight: 600; }
 .cal-cell.holiday.today {
-  background: rgba(var(--hd, 232, 96, 92), 0.2);
-  box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.55), inset 0 0 0 2px rgba(var(--hd, 232, 96, 92), 0.28);
+  background: rgba(var(--hd, 255, 122, 112), 0.2);
+  box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.55), inset 0 0 0 2px rgba(var(--hd, 255, 122, 112), 0.28);
 }
 
 .cal-holiday {

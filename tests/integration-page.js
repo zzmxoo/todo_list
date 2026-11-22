@@ -674,6 +674,40 @@
     return `${found.title} days=${cells.length}`;
   });
 
+  await t('[REG-37] 节日底色整体偏暖，不用冷色与阴暗色', async () => {
+    // 需求：节日配色偏积极暖色，避免冷色调/阴暗；清明节保留清冷竹青。
+    // 冷色判定：色相落在青绿~蓝紫区间（150°–300°）即视为冷色。
+    const tint = window.HolidayTint;
+    ok(tint, 'HolidayTint exposed');
+    const names = Object.keys(tint);
+    ok(names.length >= 7, 'all holidays covered: ' + names.length);
+    const wrong = [];
+    for (const name of names) {
+      const [r, g, b] = tint[name].split(',').map((n) => Number(n.trim()));
+      ok([r, g, b].every((n) => Number.isFinite(n) && n >= 0 && n <= 255), `${name} rgb valid`);
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const delta = max - min;
+      let hue = 0;
+      if (delta !== 0) {
+        if (max === r) hue = 60 * (((g - b) / delta) % 6);
+        else if (max === g) hue = 60 * ((b - r) / delta + 2);
+        else hue = 60 * ((r - g) / delta + 4);
+      }
+      if (hue < 0) hue += 360;
+      const isCold = hue >= 150 && hue <= 300;
+      const isDim = max < 150; // 明度不足，显阴暗
+      if (name === '清明节') {
+        ok(!isDim, '清明节 not dim');
+        continue;
+      }
+      if (isCold) wrong.push(`${name} 色相 ${Math.round(hue)}° 偏冷`);
+      if (isDim) wrong.push(`${name} 明度 ${max} 偏暗`);
+    }
+    ok(wrong.length === 0, wrong.join('; '));
+    return names.length + ' holidays, all warm & bright';
+  });
+
   await t('[REG-21] 日历退回普通模式', async () => {
     await setCalendar(false);
     ok(!document.body.classList.contains('calendar-mode'));
