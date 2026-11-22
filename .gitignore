@@ -20,5 +20,8 @@ desktop.ini
 .vscode/
 .claude/settings.local.json
 
+# 根目录下的临时 HTML（调试时抓取的网页缓存等），源码 HTML 在 ui/ 下
+/*.html
+
 # agent scratch
 .superpowers/

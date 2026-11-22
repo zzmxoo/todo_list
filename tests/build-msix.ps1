@@ -43,12 +43,23 @@ $displayName = $conf.productName
 if (-not $IdentityName) { $IdentityName = $conf.identifier }
 if (-not $PublisherDisplayName) { $PublisherDisplayName = $conf.productName }
 
-# MSIX Version 必须是四段 (Major.Minor.Build.Revision)，最后一段不能为 0
+# MSIX Version 必须是四段 (Major.Minor.Build.Revision)。商店规则：
+#   - 第四段（revision）保留给商店使用，构建时必须为 0
+#   - 其余段为 0–65535，但第一段不能为 0
+# semver 的 0.0.7 不满足"第一段不能为 0"，因此映射为 1.<minor>.<patch>.0。
 $parts = $version.Split('.')
-while ($parts.Count -lt 4) { $parts += '0' }
-if ($parts[3] -eq '0') { $parts[3] = '1' }
-$msixVersion = $parts -join '.'
-Write-Host "package version: $msixVersion (from $version)"
+if ($parts.Count -lt 3 -or $parts.Count -gt 4 -or $parts[0] -notmatch '^\d+$') {
+  throw "不支持的版本号格式：$version（应为 x.y.z 或 x.y.z.w）"
+}
+foreach ($seg in $parts) {
+  if ($seg -notmatch '^\d+$' -or [int]$seg -gt 65535) {
+    throw "版本号每段必须是 0-65535 的整数：$version"
+  }
+}
+$major = [int]$parts[0]
+if ($major -eq 0) { $major = 1 }  # 商店要求第一段不能为 0
+$msixVersion = '{0}.{1}.{2}.0' -f $major, [int]$parts[1], [int]$parts[2]
+Write-Host "package version: $msixVersion (from $version; revision fixed to 0 for Store)"
 
 # 准备暂存目录
 $stage = Join-Path $OutDir 'stage'
@@ -101,12 +112,25 @@ foreach ($name in $need.Keys) {
 
 # 清单
 $tpl = Get-Content (Join-Path $crateDir 'msix\Package.appxmanifest.template.xml') -Raw -Encoding UTF8
-$desc = if ($conf.bundle.description) { $conf.bundle.description } else { '桌面待办小工具' }
-$manifest = $tpl.Replace('{{IDENTITY_NAME}}', $IdentityName).
-  Replace('{{PUBLISHER}}', $Publisher).
-  Replace('{{DISPLAY_NAME}}', $displayName).
-  Replace('{{PUBLISHER_DISPLAY_NAME}}', $PublisherDisplayName).
-  Replace('{{DESCRIPTION}}', $desc).
+# Tauri v2 的 bundle 配置里字段名是 shortDescription / longDescription，
+# 没有 description（那个是 fileAssociations 下的）
+$desc = if ($conf.bundle.shortDescription) { $conf.bundle.shortDescription } else { '桌面待办小工具' }
+
+# 身份与名称校验：错误要在这里暴露，而不是等到 makeappx 报难懂的 XML 错误
+if ($IdentityName -notmatch '^[-_.A-Za-z0-9]{3,50}$') {
+  throw "IdentityName 只能包含字母、数字、. _ - 且长度 3-50：$IdentityName（中文名会被 makeappx 拒绝）"
+}
+if ($Publisher -notmatch '^(CN=)?[^,=&<>"]+$') {
+  throw "Publisher 格式异常：$Publisher"
+}
+
+# XML 转义：产品名或 Publisher 含 & < > " 时，未转义会写出非法 XML
+$esc = { param($v) [System.Security.SecurityElement]::Escape([string]$v) }
+$manifest = $tpl.Replace('{{IDENTITY_NAME}}', (& $esc $IdentityName)).
+  Replace('{{PUBLISHER}}', (& $esc $Publisher)).
+  Replace('{{DISPLAY_NAME}}', (& $esc $displayName)).
+  Replace('{{PUBLISHER_DISPLAY_NAME}}', (& $esc $PublisherDisplayName)).
+  Replace('{{DESCRIPTION}}', (& $esc $desc)).
   Replace('{{VERSION}}', $msixVersion)
 [System.IO.File]::WriteAllText((Join-Path $stage 'AppxManifest.xml'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "manifest: Identity=$IdentityName Publisher=$Publisher Version=$msixVersion"

@@ -236,6 +236,10 @@ fn cancel_window_anim() {
 async fn get_autostart() -> Result<bool, String> {
     #[cfg(windows)]
     {
+        // 包身份下注册表方案不生效，直接报告为关闭，避免界面显示与实际不符
+        if has_package_identity() {
+            return Ok(false);
+        }
         let output = tokio::process::Command::new("reg")
             .args(["query", AUTOSTART_KEY, "/v", AUTOSTART_NAME])
             .output()
@@ -249,10 +253,31 @@ async fn get_autostart() -> Result<bool, String> {
     }
 }
 
+/// 判断当前进程是否运行在 MSIX 包身份下。
+///
+/// 打包运行时写 HKCU\...\Run 会被 Windows 的应用虚拟化重定向到
+/// 每个应用私有的 hive，系统的登录启动机制看不到，开机自启会静默失效。
+/// 这种情况必须走 StartupTask API，不能沿用注册表方案。
+#[cfg(windows)]
+fn has_package_identity() -> bool {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentPackageFullName(len: *mut u32, name: *mut u16) -> i32;
+    }
+    // APPMODEL_ERROR_NO_PACKAGE = 15700
+    const APPMODEL_ERROR_NO_PACKAGE: i32 = 15700;
+    let mut len: u32 = 0;
+    let rc = unsafe { GetCurrentPackageFullName(&mut len, std::ptr::null_mut()) };
+    rc != APPMODEL_ERROR_NO_PACKAGE
+}
+
 #[tauri::command]
 async fn set_autostart(enabled: bool) -> Result<bool, String> {
     #[cfg(windows)]
     {
+        if has_package_identity() {
+            return Err("商店版暂不支持开机自启，请使用安装版（NSIS）".into());
+        }
         if enabled {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let value = exe.to_string_lossy().to_string();

@@ -48,6 +48,27 @@ jobs:
         working-directory: src-tauri
         run: cargo test --release
 
+      # MSIX 供 Microsoft Store 上架；Tauri 没有 msix 目标，用 makeappx 手工打包。
+      # 必须在发布 Release 之前完成，否则 MSIX 失败会留下一个缺资产的公开 Release。
+      # 身份参数从仓库 Variables 读取（Settings → Secrets and variables → Actions → Variables）：
+      #   MSIX_IDENTITY_NAME / MSIX_PUBLISHER / MSIX_PUBLISHER_DISPLAY_NAME
+      # 未配置时跳过，避免产出无法上架的占位包。
+      - name: 生成 MSIX 包
+        id: msix
+        shell: pwsh
+        run: |
+          $id  = '${{ vars.MSIX_IDENTITY_NAME }}'
+          $pub = '${{ vars.MSIX_PUBLISHER }}'
+          $pd  = '${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}'
+          if (-not $id -or -not $pub) {
+            Write-Host "::warning::未配置 MSIX_IDENTITY_NAME / MSIX_PUBLISHER，跳过 MSIX 打包"
+            "skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
+          ./tests/build-msix.ps1 -IdentityName $id -Publisher $pub -PublisherDisplayName $pd
+          $msix = Get-ChildItem src-tauri/target/msix/*.msix | Select-Object -First 1
+          "path=$($msix.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: 打包并发布
         uses: tauri-apps/tauri-action@v1
         env:
@@ -65,18 +86,11 @@ jobs:
           uploadPlainBinary: true
           releaseAssetNamePattern: '[mainBinaryName]_[version][setup].[ext]'
 
-      # MSIX 供 Microsoft Store 上架；Tauri 没有 msix 目标，用 makeappx 手工打包。
-      # 未签名版本可用于 Partner Center 提交（由微软签名后分发）。
-      - name: 生成 MSIX 包
-        shell: pwsh
-        run: |
-          ./tests/build-msix.ps1
-          $msix = Get-ChildItem src-tauri/target/msix/*.msix | Select-Object -First 1
-          "MSIX_PATH=$($msix.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: 上传 MSIX 到 Release
+        if: steps.msix.outputs.skip != 'true'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MSIX_PATH: ${{ steps.msix.outputs.path }}
         run: |
           gh release upload $env:GITHUB_REF_NAME $env:MSIX_PATH --clobber

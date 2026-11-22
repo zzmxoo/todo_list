@@ -6,9 +6,8 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap desktop rescap">
+  IgnorableNamespaces="uap rescap">
 
   <Identity
     Name="{{IDENTITY_NAME}}"
@@ -44,12 +43,13 @@
         <uap:SplashScreen Image="Assets\SplashScreen.png" />
       </uap:VisualElements>
 
-      <Extensions>
-        <!-- 桌面桥扩展：允许传统的 Win32 行为（托盘、注册表、任意路径） -->
-        <desktop:Extension Category="windows.startupTask" Executable="desktop-todo.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop:StartupTask TaskId="DesktopTodoStartup" Enabled="false" DisplayName="{{DISPLAY_NAME}}" />
-        </desktop:Extension>
-      </Extensions>
+      <!--
+        注意：这里刻意不声明 windows.startupTask。
+        应用当前的开机自启走 HKCU\...\Run，在 MSIX 包身份下会被应用虚拟化
+        重定向，系统看不到；而 StartupTask API 尚未接入。因此商店版直接禁用
+        开机自启（main.rs 的 has_package_identity 会拦截），避免声明与实现脱节。
+        将来接入 StartupTask 后再补回扩展声明。
+      -->
     </Application>
   </Applications>
 

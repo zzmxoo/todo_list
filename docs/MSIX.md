@@ -24,9 +24,12 @@ powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -Pfxn .\cert.pfx -
 产物：`src-tauri/target/msix/DesktopTodo_<version>_x64.msix`
 
 脚本会：
-- 从 `tauri.conf.json` 读取版本号，转成 MSIX 必需的四段格式（`0.0.7` → `0.0.7.1`，末段不能为 0）
+- 从 `tauri.conf.json` 读取版本号，转成商店要求格式：`0.0.7` → `1.0.7.0`
+  - 商店规则：第四段（revision）保留给商店，**构建时必须为 0**；第一段**不能为 0**
+  - 因此 semver 的 major=0 会被提升为 1
 - 从 `src-tauri/icons/msix/` 复制并补齐清单引用的全部资源尺寸
-- 填充 `src-tauri/msix/Package.appxmanifest.template.xml`
+- 填充 `src-tauri/msix/Package.appxmanifest.template.xml`，并对所有值做 XML 转义
+- 校验 `IdentityName` 只含 `A-Za-z0-9._-`（中文会被 makeappx 拒绝）
 
 ## 必需参数：Publisher 必须与证书一致
 
@@ -44,7 +47,7 @@ CN=1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D
 powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 `
   -Publisher "CN=1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D" `
   -PublisherDisplayName "你的开发者名称" `
-  -IdentityName "你的PublisherID.桌面待办"
+  -IdentityName "你的PublisherID.DesktopTodo"
 ```
 
 **提交 Partner Center 时一般不需要自签名**，微软会用商店证书重签。本脚本不传 `-Pfxn` 即可。
@@ -83,8 +86,30 @@ powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 `
 5. 填写上架表单：年龄分级、隐私政策、系统要求、描述与截图
 6. 提交审核
 
+## 商店版的已知限制
+
+**开机自启不可用。** MSIX 应用的写入会被虚拟化到每应用私有的注册表视图，
+`HKCU\...\Run` 对系统登录启动机制不可见，因此注册表方案在包身份下静默失效。
+目前 `set_autostart` 会检测包身份并直接返回错误提示，`get_autostart` 报告为关闭，
+避免界面显示与实际不符。安装版（NSIS）不受影响。
+
+若将来需要商店版支持，需接入 `Windows.ApplicationModel.StartupTask` API，
+并在清单里补回 `windows.startupTask` 扩展声明。
+
 ## CI
 
-`.github/workflows/release.yml` 已加入 MSIX 构建与上传步骤。推 tag 后会自动生成 MSIX 并附到 Release 页面。
+`.github/workflows/release.yml` 已加入 MSIX 构建与上传步骤，且排在发布 Release **之前**
+（避免 MSIX 失败留下缺资产的公开 Release）。
+
+身份参数从仓库 Variables 读取，需在
+**Settings → Secrets and variables → Actions → Variables** 配置：
+
+| 变量 | 示例 |
+| --- | --- |
+| `MSIX_IDENTITY_NAME` | `1234ABCD.DesktopTodo` |
+| `MSIX_PUBLISHER` | `CN=1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D` |
+| `MSIX_PUBLISHER_DISPLAY_NAME` | 你的开发者显示名称 |
+
+未配置时 MSIX 步骤会跳过并给出警告，不会产出无法上架的占位包。
 
 注意：CI 打出的是未签名包，仅用于提交 Partner Center 或本地 sideload（需手动签名）。
