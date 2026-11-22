@@ -119,18 +119,7 @@
   // 中国法定节假日：NateScarlet/holiday-cn 每年发布一份 JSON，包含放假与调休
   const HOLIDAY_URL = (year) =>
     `https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`;
-  // 节日底色：整体偏暖、明度偏高，避免冷色与压抑感。
-  // 清明节是唯一例外，保留清冷的竹青以贴合节气氛围。
-  // 色相均落在红/橙/金区间（0°–40°），与深色卡片背景对比度 ≥ 4.4。
-  const HOLIDAY_TINT = {
-    元旦: "255, 138, 128",   // 珊瑚粉，新年
-    春节: "255, 107, 107",   // 明快朱红
-    清明节: "122, 200, 168", // 竹青（冷色豁免）
-    劳动节: "255, 168, 84",  // 暖橙，活力
-    端午节: "255, 190, 92",  // 金黄偏橙
-    中秋节: "255, 207, 112", // 月华金
-    国庆节: "255, 122, 112", // 节庆红
-  };
+  // 节日底色等纯规则集中在 ui/domain/holiday.js（HolidayDomain.holidayTint）
 
   // 每日一句：内置 1460 条中外名言/格言/谚语，随机展示，不需要联网
   const QUOTE_SEED_URL = "quotes.json";
@@ -280,7 +269,7 @@
   const { parseDue, dueState, dueText, todoDuration, sortTodos, createTodo, applyDone } =
     window.TodoDomain;
   const { buildEvents, buildMonthWeeks } = window.CalendarDomain;
-  const { buildHolidayMap } = window.HolidayDomain;
+  const { buildHolidayMap, holidayTint, holidayBase } = window.HolidayDomain;
   const { pickQuote } = window.QuoteDomain;
 
   function wmoInfo(code) {
@@ -1769,23 +1758,24 @@
       renderWeatherPill();
       renderCalendar();
     } catch (err) {
-      // 只有真正的网络层失败才视为「不可联网」，城市不存在等业务错误不影响悬停信息。
-      // 请求可能走原生 fetch（浏览器错误对象）或 Rust fetch_json（错误字符串），两种都识别。
+      // 只有真正的网络层失败才视为「不可联网」，城市不存在、HTTP 4xx 等业务错误
+      // 不影响悬停信息，也不该无限重试。
+      // 请求统一走 Rust fetch_json，网络类错误由 Rust 打上 NET_ERR 前缀；
+      // 保留原生 fetch 的错误类型判断，兼容浏览器侧调用。
       const text = (err && (err.message || String(err))) || "";
       const isNetwork =
         !!err &&
         (err.name === "TimeoutError" ||
           err.name === "TypeError" ||
-          /network|timed? ?out|connect|dns|resolve|unreachable|请求失败/i.test(text));
+          text.startsWith("NET_ERR:"));
       if (isNetwork) networkOk = false;
       weatherFailed += 1;
       console.warn("weather failed", err);
-      const message =
-        err && err.name === "TimeoutError"
-          ? "天气请求超时"
-          : (err && err.message) || String(err) || "网络连接失败";
+      // 去掉内部前缀再展示给用户
+      const clean = text.replace(/^NET_ERR:/, "");
+      const message = clean || "网络连接失败";
       setWcStatus(message);
-      // 网络类失败自动退避重试；城市不存在等业务错误不重试（重试也会同样失败）
+      // 网络类失败自动退避重试；业务错误不重试（重试也会同样失败）
       if (isNetwork) scheduleWeatherRetry();
     } finally {
       weatherBusy = false;
@@ -2227,7 +2217,8 @@
           cell.classList.add("holiday");
           cell.dataset.holiday = holidayName;
           cell.title = holidayName;
-          cell.style.setProperty("--hd", HOLIDAY_TINT[holidayName] || "255, 122, 112");
+          cell.style.setProperty("--hd", holidayTint(holidayName));
+          cell.style.setProperty("--hdb", holidayBase(holidayName));
         }
 
         const day = document.createElement("span");
@@ -3107,7 +3098,4 @@
   }
 
   document.addEventListener("DOMContentLoaded", boot);
-
-  // 测试钩子：暴露节日配色表，供回归用例校验色相与明度（生产环境只读常量）。
-  window.HolidayTint = HOLIDAY_TINT;
 })();

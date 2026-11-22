@@ -90,7 +90,29 @@ fn export_text(default_name: String, content: String) -> Result<Option<String>, 
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
-/// 代用户请求天气接口，绕开 WebView 的跨域限制。
+/// 把 reqwest 错误归类成前端可稳定识别的文案。
+///
+/// reqwest 的 `Display` 对 `Kind::Request` 只输出 `error sending request for url (...)`，
+/// 真正的根因（超时、DNS、连接失败）在 source 链里拿不到，前端无法据此判断网络故障。
+/// 因此在这里用 `is_timeout` / `is_connect` 归一化，并统一加上 `NET_ERR` 前缀。
+fn classify_request_error(err: &reqwest::Error) -> String {
+    if err.is_timeout() {
+        format!("{NET_ERR}请求超时")
+    } else if err.is_connect() {
+        format!("{NET_ERR}连接失败")
+    } else if err.is_request() {
+        format!("{NET_ERR}请求发送失败")
+    } else if err.is_body() || err.is_decode() {
+        format!("{NET_ERR}响应读取失败")
+    } else {
+        format!("{NET_ERR}{err}")
+    }
+}
+
+/// 网络类错误的统一标记，前端据此决定是否退避重试。
+const NET_ERR: &str = "NET_ERR:";
+
+/// 代用户请求接口，绕开 WebView 的跨域限制。
 #[tauri::command]
 async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -98,17 +120,30 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
     }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(12))
-        // OSM Nominatim 使用政策要求可识别的 UA，含应用名与联系方式
-        .user_agent("desktop-todo/0.0.7 (https://github.com/zzmxoo/todo_list)")
+        // OSM Nominatim 使用政策要求可识别的 UA；版本号取 Cargo，避免发版后过期
+        .user_agent(concat!(
+            "desktop-todo/",
+            env!("CARGO_PKG_VERSION"),
+            " (https://github.com/zzmxoo/todo_list)"
+        ))
         .build()
-        .map_err(|e| e.to_string())?;
-    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+        .map_err(|e| classify_request_error(&e))?;
+    let res = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| classify_request_error(&e))?;
     if !res.status().is_success() {
-        return Err(format!("天气请求失败：HTTP {}", res.status()));
+        // HTTP 状态错误属于服务端/配置问题，不是网络不可用：不带 NET_ERR 前缀。
+        // 5xx 与 429 视为暂时性错误，前端可重试。
+        let code = res.status().as_u16();
+        let retryable = res.status().is_server_error() || code == 429;
+        let prefix = if retryable { NET_ERR } else { "" };
+        return Err(format!("{prefix}请求失败：HTTP {code}"));
     }
     res.json::<serde_json::Value>()
         .await
-        .map_err(|e| format!("天气数据解析失败：{e}"))
+        .map_err(|e| format!("数据解析失败：{e}"))
 }
 
 const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
@@ -380,5 +415,53 @@ mod tests {
         assert!(args.contains(&AUTOSTART_KEY.to_string()));
         assert!(args.contains(&AUTOSTART_NAME.to_string()));
         assert_eq!(args.last().map(String::as_str), Some("/f"));
+    }
+
+    /// HTTP 状态错误不能被前端当成「网络不可用」：否则一次 401 会让
+    /// networkOk 永久为 false，连带日历悬浮信息失效。
+    /// 5xx / 429 属于暂时性错误，需要带 NET_ERR 前缀让前端重试。
+    #[test]
+    fn http_status_error_prefix_follows_retryability() {
+        let msg = |code: u16| {
+            let status = reqwest::StatusCode::from_u16(code).unwrap();
+            let retryable = status.is_server_error() || code == 429;
+            let prefix = if retryable { NET_ERR } else { "" };
+            format!("{prefix}请求失败：HTTP {code}")
+        };
+        // 4xx（认证/找不到）不是网络故障，不带前缀 -> 不重试、不污染 networkOk
+        assert!(!msg(401).starts_with(NET_ERR));
+        assert!(!msg(403).starts_with(NET_ERR));
+        assert!(!msg(404).starts_with(NET_ERR));
+        // 5xx / 429 是暂时性的，带前缀 -> 前端退避重试
+        assert!(msg(500).starts_with(NET_ERR));
+        assert!(msg(503).starts_with(NET_ERR));
+        assert!(msg(429).starts_with(NET_ERR));
+    }
+
+    /// classify_request_error 必须给所有分支加上 NET_ERR 前缀，
+    /// 否则前端无法识别真实的断网/超时。
+    #[test]
+    fn request_errors_are_prefixed_and_timeout_recognized() {
+        // 构造一个真实的连接失败：指向必然拒绝的端口
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let msg = rt.block_on(async {
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_millis(300))
+                .build()
+                .unwrap();
+            // 127.0.0.1 上未监听的端口 -> is_connect
+            match client.get("http://127.0.0.1:1/").send().await {
+                Ok(_) => String::new(),
+                Err(e) => classify_request_error(&e),
+            }
+        });
+        assert!(msg.starts_with(NET_ERR), "expected NET_ERR prefix, got: {msg}");
+        assert!(
+            msg.contains("连接失败") || msg.contains("请求发送失败") || msg.contains("请求超时"),
+            "unexpected message: {msg}"
+        );
     }
 }

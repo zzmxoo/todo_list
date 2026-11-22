@@ -788,14 +788,21 @@ body.minimal-mode .add-row .add-input { font-size: 12px; }
 
 .cal-cell.today .cal-day { color: #fff; font-weight: 600; }
 
+/* 节日格先垫一层固定暖底，再叠 --hd。
+   否则 --hd 只会以 24% 覆盖在用户选的玻璃底色上，
+   冷色背景下所有节日都会渲染成同一种蓝紫，失去区分度。 */
 .cal-cell.holiday {
-  background: rgba(var(--hd, 255, 122, 112), 0.16);
-  box-shadow: inset 0 0 0 1px rgba(var(--hd, 255, 122, 112), 0.2);
+  background:
+    linear-gradient(rgba(var(--hd, 236, 170, 120), .24), rgba(var(--hd, 236, 170, 120), .24)),
+    linear-gradient(rgba(var(--hdb, 58, 34, 30), .9), rgba(var(--hdb, 58, 34, 30), .9));
+  box-shadow: inset 0 0 0 1px rgba(var(--hd, 236, 170, 120), 0.32);
 }
 .cal-cell.holiday .cal-day { color: #ffe9e4; font-weight: 600; }
 .cal-cell.holiday.today {
-  background: rgba(var(--hd, 255, 122, 112), 0.2);
-  box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.55), inset 0 0 0 2px rgba(var(--hd, 255, 122, 112), 0.28);
+  background:
+    linear-gradient(rgba(var(--hd, 236, 170, 120), .30), rgba(var(--hd, 236, 170, 120), .30)),
+    linear-gradient(rgba(var(--hdb, 58, 34, 30), .92), rgba(var(--hdb, 58, 34, 30), .92));
+  box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.55), inset 0 0 0 2px rgba(var(--hd, 236, 170, 120), 0.4);
 }
 
 .cal-holiday {

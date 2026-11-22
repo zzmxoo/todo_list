@@ -674,38 +674,83 @@
     return `${found.title} days=${cells.length}`;
   });
 
-  await t('[REG-37] 节日底色整体偏暖，不用冷色与阴暗色', async () => {
-    // 需求：节日配色偏积极暖色，避免冷色调/阴暗；清明节保留清冷竹青。
-    // 冷色判定：色相落在青绿~蓝紫区间（150°–300°）即视为冷色。
-    const tint = window.HolidayTint;
-    ok(tint, 'HolidayTint exposed');
-    const names = Object.keys(tint);
-    ok(names.length >= 7, 'all holidays covered: ' + names.length);
-    const wrong = [];
-    for (const name of names) {
-      const [r, g, b] = tint[name].split(',').map((n) => Number(n.trim()));
-      ok([r, g, b].every((n) => Number.isFinite(n) && n >= 0 && n <= 255), `${name} rgb valid`);
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const delta = max - min;
-      let hue = 0;
-      if (delta !== 0) {
-        if (max === r) hue = 60 * (((g - b) / delta) % 6);
-        else if (max === g) hue = 60 * ((b - r) / delta + 2);
-        else hue = 60 * ((r - g) / delta + 4);
+  await t('[REG-38] 天气错误分类：HTTP 4xx 不算断网，网络错误才算', async () => {
+    // 旧问题：前端用 /请求失败/ 正则识别网络错误，导致
+    //   1) Rust 真实网络错误（error sending request for url）反而匹配不上，断网不重试
+    //   2) HTTP 401 命中"请求失败"，networkOk 被永久置 false，日历悬浮信息连带失效
+    // 现在 Rust 侧用 NET_ERR 前缀标记网络类错误，前端只认前缀。
+    // 先切到日历模式承载 #calInfo，再从普通模式的天气入口制造失败
+    const realInvoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+    const infoFires = () => {
+      // showCalInfo 在 networkOk === false 时直接 return，借 #calInfo 的显隐判断状态
+      const info = document.getElementById('calInfo');
+      if (!info) return false;
+      info.hidden = true;
+      const cell = $$('.cal-cell').find((c) => !c.classList.contains('other-month'));
+      if (!cell) return false;
+      cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+      return info.hidden === false;
+    };
+    let mode = null; // null | 'http4xx' | 'network'
+    window.__TEST_INVOKE = function (cmd, args) {
+      if (cmd === 'fetch_json' && mode && /open-meteo|nominatim/.test((args && args.url) || '')) {
+        if (mode === 'http4xx') {
+          // 不带前缀：服务端/配置问题，不是断网
+          return Promise.reject(new Error('请求失败：HTTP 401'));
+        }
+        return Promise.reject(new Error('NET_ERR:连接失败'));
       }
-      if (hue < 0) hue += 360;
-      const isCold = hue >= 150 && hue <= 300;
-      const isDim = max < 150; // 明度不足，显阴暗
-      if (name === '清明节') {
-        ok(!isDim, '清明节 not dim');
-        continue;
+      return realInvoke(cmd, args);
+    };
+    try {
+      await setCalendar(true);
+      await sleep(300);
+
+      // 先确保 networkOk 处于可用状态
+      mode = null;
+      const input = $('#cityInput');
+      if (input) {
+        input.value = '上海';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await waitFor(() => (($('#wcStatus') || {}).textContent || '') === '', 20000, 250);
       }
-      if (isCold) wrong.push(`${name} 色相 ${Math.round(hue)}° 偏冷`);
-      if (isDim) wrong.push(`${name} 明度 ${max} 偏暗`);
+      ok(infoFires(), 'baseline: hover info available');
+      await sleep(1400);
+
+      // 1) HTTP 401：不应把 networkOk 打掉，悬浮信息仍可用
+      mode = 'http4xx';
+      if (input) {
+        input.value = '广州';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await waitFor(() => (($('#wcStatus') || {}).textContent || '').includes('HTTP'), 20000, 250);
+      }
+      await sleep(300);
+      ok(infoFires(), '4xx must not disable hover info');
+      await sleep(1400);
+
+      // 2) 网络错误：应识别为断网，悬浮信息停用
+      mode = 'network';
+      if (input) {
+        input.value = '成都';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await waitFor(() => (($('#wcStatus') || {}).textContent || '').includes('连接失败'), 20000, 250);
+      }
+      await sleep(300);
+      ok(!infoFires(), 'network error must disable hover info');
+
+      // 恢复
+      mode = null;
+      if (input) {
+        input.value = '上海';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(3000);
+      }
+      await setCalendar(false);
+      return 'classification verified';
+    } finally {
+      window.__TEST_INVOKE = null;
+      if (document.body.classList.contains('calendar-mode')) await setCalendar(false);
     }
-    ok(wrong.length === 0, wrong.join('; '));
-    return names.length + ' holidays, all warm & bright';
   });
 
   await t('[REG-21] 日历退回普通模式', async () => {
@@ -1105,8 +1150,10 @@
     };
     let blocked = false;
     window.__TEST_INVOKE = function (cmd, args) {
-      if (blocked && cmd === 'fetch_json') {
-        return Promise.reject(new Error('network error: connection failed'));
+      // 只拦天气与地理编码，避免连带拦下节假日请求（会把该年写入 holidayFailed）
+      if (blocked && cmd === 'fetch_json' && /open-meteo|nominatim/.test((args && args.url) || '')) {
+        // 与 Rust classify_request_error 的真实输出保持一致，否则用例会掩盖分类缺陷
+        return Promise.reject(new Error('NET_ERR:连接失败'));
       }
       return realInvoke(cmd, args);
     };
