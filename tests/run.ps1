@@ -1,4 +1,4 @@
-param([int]$Port = 9222)
+﻿param([int]$Port = 9222)
 $ErrorActionPreference = 'Stop'
 $cdp = Join-Path (Split-Path $PSScriptRoot -Parent) '_dev_cdp.ps1'
 
@@ -37,6 +37,6 @@ fetch('quotes.json')
 '@
 $quotes = Eval-Expr $quotesExpr | ConvertFrom-Json
 "QUOTES total=$($quotes.total) unique=$($quotes.unique) dup=$($quotes.dup) badLen=$($quotes.badLen) badAuthor=$($quotes.badAuthor)"
-if ($failed -gt 0 -or $quotes.total -ne 1460 -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
+if ($failed -gt 0 -or $quotes.total -ne 1427 -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
   exit 1
 }

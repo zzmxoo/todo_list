@@ -69,10 +69,10 @@
     // 需求：颜色不要太多。大节日统一一个暖色系，小节日用同色系的冷色。
     const groups = holiday.GROUPS;
     eq(Object.keys(groups).length, 2, '色系数');
-    for (const name of ['春节', '国庆节', '元旦']) {
+    for (const name of ['春节', '国庆节', '元旦', '劳动节']) {
       eq(holiday.groupOf(name), 'warm', name + ' 应在暖色系');
     }
-    for (const name of ['清明节', '端午节', '劳动节', '中秋节']) {
+    for (const name of ['清明节', '端午节', '中秋节']) {
       eq(holiday.groupOf(name), 'cool', name + ' 应在冷色系');
     }
     const all = ['元旦', '春节', '清明节', '劳动节', '端午节', '中秋节', '国庆节'];
@@ -83,16 +83,18 @@
   test('同色系的节日渲染色完全一致', () => {
     eq(holiday.holidayTint('春节'), holiday.holidayTint('国庆节'), '春节/国庆同色');
     eq(holiday.holidayTint('元旦'), holiday.holidayTint('国庆节'), '元旦/国庆同色');
+    eq(holiday.holidayTint('劳动节'), holiday.holidayTint('春节'), '劳动/春节同色');
     eq(holiday.holidayTint('清明节'), holiday.holidayTint('端午节'), '清明/端午同色');
-    eq(holiday.holidayTint('劳动节'), holiday.holidayTint('中秋节'), '劳动/中秋同色');
+    eq(holiday.holidayTint('端午节'), holiday.holidayTint('中秋节'), '端午/中秋同色');
   });
 
   test('节日色块视觉重量足够轻，不能抢走主界面焦点', () => {
     // 需求：连续 7 天的大面积高亮色块会抢走左侧待办清单的焦点，
     // 甚至比"今天"的白框还重。要求渲染后与普通格的差异远小于早期实现。
-    // 早期不透明底方案差异约 84；12% 单层叠色约 30。
+    // 早期不透明底方案约 84；12% 约 30（几乎看不出）；现用 24% 约 60。
+    // 阈值取 70：既能拦住早期那种整块不透明的方案，又给 24% 留出余量。
     const surface = [48, 39, 105];
-    const limit = 40;
+    const limit = 70;
     const heavy = [];
     for (const name of Object.keys(holiday.tintGroups())) {
       const rendered = holiday.composite(

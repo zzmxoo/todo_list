@@ -166,14 +166,42 @@
   click($('#calToday'));
   await sleep(200);
 
-  await t('[REG-01] 模块与名言库加载（1460 条、无重复）', async () => {
+  await t('[REG-01] 模块与名言库加载（1427 条、无重复）', async () => {
     ok(window.TodoCore && window.TodoDomain && window.CalendarDomain, 'domains');
     ok(window.HolidayDomain && window.QuoteDomain && window.WeatherAPI, 'domains2');
     const res = await fetch('quotes.json');
     const data = await res.json();
-    eq(data.quotes.length, 1460);
-    eq(new Set(data.quotes.map((q) => q.t)).size, 1460, 'unique quotes');
-    return '1460 quotes';
+    eq(data.quotes.length, 1427);
+    eq(new Set(data.quotes.map((q) => q.t)).size, 1427, 'unique quotes');
+    return '1427 quotes';
+  });
+
+  await t('[REG-39] 名言库不含贬义 / 嘲讽 / 粗俗语句', async () => {
+    // 名言用于桌面点缀，必须是正向或中性的。曾收录过
+    // 「在中国，创新就是率先模仿」这类嘲讽式论断，需要长期防回归。
+    const res = await fetch('quotes.json');
+    const data = await res.json();
+    const bad = [
+      // 贬义词直接指向人
+      /傻瓜|傻子|笨婆|蠢货|笨蛋|废物|窝囊/,
+      // 粗俗比喻
+      /疯狗|瘟疫|蛆|狗屎/,
+      // 嘲讽他人志向
+      /母鸡的理想/,
+      // 上述被移除的具体语句
+      /在中国，创新就是率先模仿/,
+      /为爱情而生活是愚蠢/,
+      /小人记仇/,
+      /虚伪的朋友，遇事常点头哈腰/,
+      /奸诈的聪明人/,
+    ];
+    const hits = data.quotes.filter((q) => bad.some((re) => re.test(q.t)));
+    if (hits.length) {
+      throw new Error(
+        '发现 ' + hits.length + ' 条不当语句：' + hits.slice(0, 3).map((q) => q.t).join(' / ')
+      );
+    }
+    return 'no derogatory quotes';
   });
 
   await t('[REG-02] 已完成待办从列表隐藏且计数正确', async () => {
