@@ -1,5 +1,6 @@
 # build output
 src-tauri/target/
+src-tauri/target-test/
 src-tauri/gen/schemas/
 
 # local state / screenshots / scratch

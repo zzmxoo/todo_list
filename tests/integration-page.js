@@ -720,6 +720,38 @@
     return `immediate registry=${Math.round(changed)}ms restore=${Math.round(restored)}ms`;
   });
 
+  await t('[REG-35] 开机启动写入失败时开关回滚，界面不能停在与实际不一致的状态', async () => {
+    // 断网/权限不足/注册表被策略锁定时 set_autostart 会 reject，
+    // 开关必须先给出即时反馈、失败后回滚，不能显示「已开启」而注册表实际没写。
+    const original = await invoke('get_autostart');
+    await openSettingsTab(0);
+    const sw = $('#autostartSwitch');
+    eq(sw.classList.contains('on'), !!original, 'initial matches registry');
+
+    const realInvoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+    let failedOnce = false;
+    window.__TEST_INVOKE = function (cmd, args) {
+      if (cmd === 'set_autostart' && !failedOnce) {
+        failedOnce = true;
+        return Promise.reject(new Error('网络异常：无法写入注册表'));
+      }
+      return realInvoke(cmd, args);
+    };
+    try {
+      click(sw);
+      const rolled = await waitFor(() => !failedOnce || sw.classList.contains('on') === !!original, 4000, 60);
+      ok(failedOnce, 'failure path exercised');
+      ok(rolled >= 0, 'switch rolled back');
+      eq(sw.classList.contains('on'), !!original, 'switch restored to registry state');
+      eq(await invoke('get_autostart'), !!original, 'registry unchanged');
+      await closeSettings();
+      return 'rolled back in ' + Math.round(rolled) + 'ms';
+    } finally {
+      window.__TEST_INVOKE = null;
+      await closeSettings();
+    }
+  });
+
   await t('[REG-24] 窗口靠边吸附（20px 内归位）', async () => {
     await closeSettings();
     await sleep(300);
@@ -985,6 +1017,97 @@
     await w.setPosition(new PPos(orig.x, orig.y));
     await sleep(500);
     return 'revealed then auto-hidden';
+  });
+
+  await t('[REG-36] 保存失败不能丢待办：内存状态保留，恢复后下一次保存完整落盘', async () => {
+    // 断网/磁盘异常时 save_state 会 reject。旧实现只 console.warn，
+    // 若此后不再触发保存，用户的待办就只存在于内存、重启即丢。
+    await closeSettings();
+    const realInvoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+    const text = 'ITEST-断网保存-' + Date.now();
+    let failSaves = true;
+    window.__TEST_INVOKE = function (cmd, args) {
+      if (cmd === 'save_state' && failSaves) {
+        return Promise.reject(new Error('网络异常：无法写入磁盘'));
+      }
+      return realInvoke(cmd, args);
+    };
+    try {
+      await addTodo(text);
+      eq(todoTexts().includes(text), true, 'todo stays in memory after failed save');
+
+      // 恢复后不需要再做任何操作，自动补写必须把内存状态落盘
+      failSaves = false;
+      const saved = await waitFor(async () => {
+        const st = await invoke('load_state');
+        return ((st && st.todos) || []).some((t) => t.text === text);
+      }, 15000, 200);
+      ok(saved >= 0, 'state not persisted after recovery (no auto-retry)');
+
+      // 清理测试待办
+      await deleteTodo(text);
+      const ok2 = await waitFor(() => !todoTexts().includes(text), 3000, 100);
+      ok(ok2 >= 0, 'cleanup failed');
+      return 'memory kept, persisted in ' + Math.round(saved) + 'ms';
+    } finally {
+      window.__TEST_INVOKE = null;
+    }
+  });
+
+  await t('[REG-34] 天气拉取失败后重新打开天气卡要自动重试，不能停在占位文案', async () => {
+    // 旧问题：refreshWeather 只在启动 350ms 和每 30 分钟各跑一次，
+    // toggleWeather 打开卡片时只把状态覆写成「正在获取天气…」且从不发请求。
+    // 于是一次失败后用户关掉再打开，真实错误被覆盖，卡片永久停在占位文案。
+    if (document.body.classList.contains('calendar-mode')) return 'skip: calendar mode';
+    const status = () => ($('#wcStatus') || {}).textContent || '';
+    const input = $('#cityInput');
+    if (!input) return 'skip: no city input';
+    const origFetch = window.fetch;
+    const setCity = (name) => {
+      input.value = name;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    let blocked = false;
+    window.fetch = function (...args) {
+      const url = String(args[0]);
+      if (blocked && /open-meteo|nominatim/.test(url)) {
+        return Promise.reject(new TypeError('Failed to fetch'));
+      }
+      return origFetch.apply(this, args);
+    };
+    const startedAt = input.value;
+    try {
+      // 1) 先切到一个正常城市，确保应用处于「能取到天气」的已知状态
+      setCity('上海');
+      const settled = await waitFor(() => status() === '', 20000, 250);
+      ok(settled >= 0, 'baseline city load failed: ' + status());
+
+      // 2) 断网后切换城市，制造一次真实的天气失败
+      blocked = true;
+      setCity('广州');
+      const surfaced = await waitFor(() => status() !== '', 20000, 200);
+      ok(surfaced >= 0, 'failure not surfaced at all');
+      const failedStatus = status();
+      ok(!failedStatus.includes('正在获取'), 'placeholder instead of error: ' + failedStatus);
+
+      // 3) 恢复网络后关闭再打开天气卡：必须自动重试并取到数据
+      blocked = false;
+      if ($('#weatherPill').classList.contains('active')) {
+        click($('#weatherPill'));
+        await sleep(700);
+      }
+      click($('#weatherPill'));
+      const recovered = await waitFor(() => status() === '', 20000, 250);
+      ok(recovered >= 0, 'stuck after reopen, status=' + status());
+      ok(($('#wcTemp') || {}).textContent !== '--°', 'temp still placeholder');
+
+      setCity(startedAt || '北京');
+      await sleep(1500);
+      return 'recovered in ' + Math.round(recovered) + 'ms';
+    } finally {
+      blocked = false;
+      window.fetch = origFetch;
+    }
   });
 
   const passed = results.filter((r) => r.ok).length;

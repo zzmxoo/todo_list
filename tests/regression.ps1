@@ -1,4 +1,4 @@
-# 完整回归套件：领域/核心单元测试 + 名言数据校验 + UI 集成回归。
+﻿# 完整回归套件：领域/核心单元测试 + 名言数据校验 + UI 集成回归。
 # 一条命令跑完，失败时退出码为 1：
 #   powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 param(
@@ -9,9 +9,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $cdp = Join-Path $root '_dev_cdp.ps1'
-$exe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
+$prodExe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
 $data = Join-Path $env:APPDATA 'com.desktoptodo.widget\data.json'
 $backup = "$data.regress"
+
+# 测试用 exe：编译期注入调试端口，产物隔离在 src-tauri\target-test\。
+# WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 在 Edge/WebView2 158 起已失效，不能再依赖。
+$exe = & (Join-Path $PSScriptRoot 'build-test-exe.ps1') -Port $Port
+if (-not $exe -or -not (Test-Path $exe)) { throw "test exe not available: $exe" }
 
 Copy-Item $data $backup -Force
 $passed = 0
@@ -76,9 +81,14 @@ try {
 
   Get-Process -Name desktop-todo -ErrorAction SilentlyContinue | Stop-Process -Force
   Start-Sleep -Milliseconds 600
-  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
   Start-Process $exe
-  Start-Sleep -Seconds 5
+  # 等 CDP 端口就绪
+  $ready = $false
+  for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Milliseconds 500
+    try { Invoke-RestMethod "http://127.0.0.1:$Port/json" | Out-Null; $ready = $true; break } catch { }
+  }
+  if (-not $ready) { throw "CDP port $Port not ready after 15s" }
 
   if (-not $SkipUnits) {
     foreach ($file in @('unit-core.js', 'unit-weather.js', 'unit-todo.js', 'unit-calendar.js', 'unit-domain.js')) {
@@ -125,8 +135,8 @@ finally {
     Copy-Item $backup $data -Force
     Remove-Item $backup -Force
   }
-  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $null
-  Start-Process $exe
+  # 恢复常驻程序用发布版，不带调试端口
+  if (Test-Path $prodExe) { Start-Process $prodExe }
 }
 
 "REGRESSION pass=$passed fail=$failed"

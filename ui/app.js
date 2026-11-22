@@ -204,7 +204,12 @@
   const CAL_H = 392;
 
   const tauri = window.__TAURI__ || {};
-  const invoke = tauri.core?.invoke || (async () => null);
+  const realInvoke = tauri.core?.invoke || (async () => null);
+  // 测试钩子：集成用例用 window.__TEST_INVOKE 注入失败（断网、磁盘只读等），生产环境为空。
+  const invoke = (cmd, args) =>
+    typeof window.__TEST_INVOKE === "function"
+      ? window.__TEST_INVOKE(cmd, args)
+      : realInvoke(cmd, args);
   const win = tauri.window?.getCurrentWindow?.() || null;
   const LogicalSize = tauri.dpi?.LogicalSize || tauri.window?.LogicalSize;
   const LogicalPosition = tauri.dpi?.LogicalPosition || tauri.window?.LogicalPosition;
@@ -231,6 +236,10 @@
   let calPress = null;
   let monthCursor = null;
   let weatherBusy = false;
+  let weatherFailed = false;
+  let weatherRetryTimer = null;
+  const WEATHER_RETRY_MS = 30 * 1000;
+  const WEATHER_RETRY_MAX_MS = 10 * 60 * 1000;
   const holidayBusy = new Set();
   const holidayFailed = new Set();
   let quoteSeed = [];
@@ -589,13 +598,42 @@
   }
 
   /* ------------------------------------------------------ persistence */
+  let saveRetryTimer = null;
+  let saveFailures = 0;
+  let saving = false;
+  const SAVE_RETRY_MS = 5 * 1000;
+  const SAVE_RETRY_MAX_MS = 2 * 60 * 1000;
+
   function save() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
+      // 上一次写盘还没结束：重新排队，绝不能直接丢弃（那会丢掉这期间的用户改动）
+      if (saving) {
+        save();
+        return;
+      }
+      saving = true;
       try {
         await invoke("save_state", { state: serializeState() });
+        saveFailures = 0;
+        clearTimeout(saveRetryTimer);
+        saveRetryTimer = null;
       } catch (err) {
+        saveFailures += 1;
         console.warn("save_state failed", err);
+        // 写盘失败不能只留在内存里：断网 / 磁盘被占用恢复后必须自动补写，
+        // 否则用户这段时间的待办会在重启后全部丢失。
+        clearTimeout(saveRetryTimer);
+        const delay = Math.min(
+          SAVE_RETRY_MAX_MS,
+          SAVE_RETRY_MS * Math.pow(2, Math.min(saveFailures - 1, 5))
+        );
+        saveRetryTimer = setTimeout(() => {
+          saveRetryTimer = null;
+          save();
+        }, delay);
+      } finally {
+        saving = false;
       }
     }, 200);
   }
@@ -1677,6 +1715,19 @@
       .replace(/\{lon\}/g, s.longitude == null ? "" : String(s.longitude));
   }
 
+  /** 失败后按 30s 起步退避重试，最长 10min；成功即复位。断网恢复后无需等 30min 定时器。 */
+  function scheduleWeatherRetry() {
+    clearTimeout(weatherRetryTimer);
+    const delay = Math.min(
+      WEATHER_RETRY_MAX_MS,
+      WEATHER_RETRY_MS * Math.pow(2, Math.max(0, weatherFailed - 1))
+    );
+    weatherRetryTimer = setTimeout(() => {
+      weatherRetryTimer = null;
+      if (state.settings.weather_open || !state.weather) refreshWeather();
+    }, delay);
+  }
+
   async function refreshWeather() {
     if (weatherBusy) return;
     const s = state.settings;
@@ -1707,6 +1758,9 @@
         (target) => invoke("fetch_json", { url: target })
       );
       networkOk = true;
+      weatherFailed = 0;
+      clearTimeout(weatherRetryTimer);
+      weatherRetryTimer = null;
       setWcStatus("");
       save();
       renderWeatherCard();
@@ -1714,13 +1768,17 @@
       renderCalendar();
     } catch (err) {
       // 只有真正的网络层失败才视为「不可联网」，城市不存在等业务错误不影响悬停信息
-      if (err && (err.name === "TimeoutError" || err.name === "TypeError")) networkOk = false;
+      const isNetwork = err && (err.name === "TimeoutError" || err.name === "TypeError");
+      if (isNetwork) networkOk = false;
+      weatherFailed += 1;
       console.warn("weather failed", err);
       const message =
         err && err.name === "TimeoutError"
           ? "天气请求超时"
           : (err && err.message) || String(err) || "网络连接失败";
       setWcStatus(message);
+      // 网络类失败自动退避重试；城市不存在等业务错误不重试（重试也会同样失败）
+      if (isNetwork) scheduleWeatherRetry();
     } finally {
       weatherBusy = false;
     }
@@ -1825,7 +1883,12 @@
       if (weatherLeft) els.topRow.insertBefore(els.weatherCard, els.todoCard);
       else els.topRow.appendChild(els.weatherCard);
       renderWeatherCard();
-      if (!state.weather) setWcStatus("正在获取天气…");
+      // 打开卡片时若还没有数据、或上次已失败，就真正拉一次；
+      // 只在占位文案上干等会让卡片永久停在「正在获取天气…」。
+      if (!state.weather || weatherFailed) {
+        setWcStatus("正在获取天气…");
+        refreshWeather();
+      }
     }
 
     await scheduleLayout();
