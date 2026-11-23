@@ -24,7 +24,7 @@ AI 客户端
 
 | 工具 | 参数 | 说明 |
 | --- | --- | --- |
-| `add_todo` | `text`（必填）、`due`、`pinned`、`provider`、`source` | 添加一条待办 |
+| `add_todo` | `text`（必填）、`due`、`start`、`duration_minutes`、`pinned`、`provider`、`source` | 添加一条待办或会议 |
 | `add_todos` | `todos` 数组，外层可统一给 `provider` / `source` | 批量添加，最多 50 条 |
 | `list_todos` | 无 | 列出未完成待办，便于 AI 去重 |
 
@@ -33,6 +33,13 @@ AI 客户端
 - `YYYY-MM-DD`：默认当天 18:00
 - `YYYY-MM-DDTHH:MM` / 带秒 / 带时区的 ISO 8601
 - `YYYY-MM-DD HH:MM`（空格会转成 T）
+
+会议/事件：
+
+- 用 `start`（开始时间）+ `duration_minutes`（分钟）表达，服务端自动算 `due`（结束时间）。
+- 也可以把开始时间放在 `time` / `due` 里再配 `duration`，服务端会把该时间当作开始。
+- `duration` 支持分钟数、`1小时`、`90分钟`、`1.5h`、`1:30`。
+- 列表会显示「今天 10:30–11:30」，日历色条按开始到结束绘制。
 
 `provider` 可用值（别名自动归一）：
 
@@ -71,6 +78,27 @@ WorkBuddy 支持自定义 MCP 连接器（stdio 或 HTTP）。新增一个 stdio
 
 保存并验证连接后，WorkBuddy 会自动发现 `add_todo` / `add_todos` / `list_todos`。如果是在其内置的 Agent/Skill 中调用，直接让 Agent 使用这些工具即可。
 
+对下面这句话：
+
+> 添加周五会议提醒，时间早上 10:30，时长 1 小时，会议名称：方案评审
+
+Agent 应解析为：
+
+```json
+{
+  "name": "add_todo",
+  "arguments": {
+    "text": "方案评审",
+    "start": "2026-11-27T10:30:00",
+    "duration_minutes": 60,
+    "provider": "workbuddy",
+    "source": "WorkBuddy"
+  }
+}
+```
+
+服务端会存成开始 `10:30`、结束 `11:30`，列表显示「今天 10:30–11:30」，日历色条覆盖这一小时。
+
 ## 豆包
 
 豆包 CLI 支持本地工具调用。优先按 MCP 连接器配置（同上，stdio + `--mcp`）；如果当前版本的豆包工作台没有 MCP 入口，则用命令行/skill 调 CLI：
@@ -108,7 +136,7 @@ CLI 只写收件箱，不要求桌面端正在运行；命令返回后待办会�
 ## 命令行
 
 ```text
-desktop-todo.exe --add <内容> [--due <时间>] [--provider <id>] [--source <名称>] [--pinned]
+desktop-todo.exe --add <内容> [--due <时间>] [--start <开始时间>] [--duration <时长>] [--provider <id>] [--source <名称>] [--pinned]
 ```
 
 示例：
@@ -119,6 +147,9 @@ desktop-todo.exe --add "买牛奶"
 
 # 带截止时间
 desktop-todo.exe --add "交房租" --due 2026-11-30
+
+# 会议：开始 10:30，时长 1 小时
+desktop-todo.exe --add "方案评审" --start "2026-11-27T10:30" --duration "1小时" --provider workbuddy
 
 # 指定来源（会显示在待办标签上）
 desktop-todo.exe --add "整理会议纪要" --provider workbuddy --source "WorkBuddy"

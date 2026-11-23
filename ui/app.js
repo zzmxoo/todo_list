@@ -1463,7 +1463,7 @@
           done_at: null,
           pinned: !!item.pinned,
           due: item.due || null,
-          start: null,
+          start: item.start || null,
           created: item.created || new Date().toISOString(),
           source: String(item.source || ""),
           provider: String(item.provider || ""),

@@ -41,11 +41,21 @@
     const today = new Date(base.getFullYear(), base.getMonth(), base.getDate());
     const target = new Date(due.getFullYear(), due.getMonth(), due.getDate());
     const diffDays = Math.round((target - today) / DAY_MS);
-    if (diffDays === 0) return `今天 ${hm(due)}`;
-    if (diffDays === 1) return `明天 ${hm(due)}`;
-    if (diffDays === -1) return `昨天 ${hm(due)}`;
+    // 会议/事件有开始时间：同一天时显示 10:30–11:30，而不是只显示结束时间
+    const start = todo.start ? new Date(todo.start) : null;
+    const range =
+      start &&
+      !Number.isNaN(start.getTime()) &&
+      start.getFullYear() === due.getFullYear() &&
+      start.getMonth() === due.getMonth() &&
+      start.getDate() === due.getDate()
+        ? `${hm(start)}–${hm(due)}`
+        : hm(due);
+    if (diffDays === 0) return `今天 ${range}`;
+    if (diffDays === 1) return `明天 ${range}`;
+    if (diffDays === -1) return `昨天 ${range}`;
     const prefix = due.getFullYear() === base.getFullYear() ? "" : `${due.getFullYear()}年`;
-    return `${prefix}${due.getMonth() + 1}月${due.getDate()}日 ${hm(due)}`;
+    return `${prefix}${due.getMonth() + 1}月${due.getDate()}日 ${range}`;
   }
 
   // 从开始（日历中添加时指定，否则为创建时间）到截止的时长文案

@@ -44,6 +44,9 @@ desktop-todo.exe --mcp
 
 # 命令行
 desktop-todo.exe --add "整理周报" --due 2026-11-28 --provider dsh
+
+# 会议：开始 10:30，时长 1 小时
+desktop-todo.exe --add "方案评审" --start "2026-11-27T10:30" --duration "1小时" --provider workbuddy
 ```
 
 AI 待办通过本地 `ai-inbox` 收件箱合并，桌面端没运行时也不会丢；列表会显示来源标签。配置示例、工具参数和新增客户端的扩展方式见 [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md)。

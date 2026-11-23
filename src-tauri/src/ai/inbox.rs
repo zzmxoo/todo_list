@@ -169,6 +169,7 @@ mod tests {
             text: text.into(),
             created: "2026-11-23T00:00:00Z".into(),
             due: None,
+            start: None,
             pinned: false,
             source: "Test".into(),
             provider: "generic".into(),

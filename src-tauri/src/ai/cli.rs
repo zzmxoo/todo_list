@@ -8,6 +8,8 @@ use super::data_dir;
 pub struct AddOptions {
     pub text: String,
     pub due: Option<String>,
+    pub start: Option<String>,
+    pub duration: Option<String>,
     pub provider: String,
     pub source: Option<String>,
     pub pinned: bool,
@@ -38,6 +40,8 @@ pub fn parse_args(args: &[String]) -> Result<Option<AddOptions>, String> {
 
     let mut text = None;
     let mut due = None;
+    let mut start = None;
+    let mut duration = None;
     let mut provider = "cli".to_string();
     let mut source = None;
     let mut pinned = false;
@@ -58,6 +62,16 @@ pub fn parse_args(args: &[String]) -> Result<Option<AddOptions>, String> {
             "--due" => {
                 let (value, next) = take_value(args, index, "--due")?;
                 due = Some(value);
+                index = next;
+            }
+            "--start" => {
+                let (value, next) = take_value(args, index, "--start")?;
+                start = Some(value);
+                index = next;
+            }
+            "--duration" => {
+                let (value, next) = take_value(args, index, "--duration")?;
+                duration = Some(value);
                 index = next;
             }
             "--provider" => {
@@ -83,6 +97,14 @@ pub fn parse_args(args: &[String]) -> Result<Option<AddOptions>, String> {
                 due = Some(arg["--due=".len()..].to_string());
                 index += 1;
             }
+            _ if arg.starts_with("--start=") => {
+                start = Some(arg["--start=".len()..].to_string());
+                index += 1;
+            }
+            _ if arg.starts_with("--duration=") => {
+                duration = Some(arg["--duration=".len()..].to_string());
+                index += 1;
+            }
             _ if arg.starts_with("--provider=") => {
                 provider = arg["--provider=".len()..].to_string();
                 index += 1;
@@ -105,6 +127,8 @@ pub fn parse_args(args: &[String]) -> Result<Option<AddOptions>, String> {
     Ok(Some(AddOptions {
         text,
         due,
+        start,
+        duration,
         provider,
         source,
         pinned,
@@ -132,6 +156,8 @@ pub fn run(args: &[String]) -> Option<i32> {
     let input = json!({
         "text": options.text,
         "due": options.due,
+        "start": options.start,
+        "duration": options.duration,
         "provider": options.provider,
         "source": options.source,
         "pinned": options.pinned
@@ -182,6 +208,10 @@ mod tests {
             "写周报",
             "--due",
             "2026-11-24",
+            "--start",
+            "2026-11-24T09:00",
+            "--duration",
+            "1小时",
             "--provider",
             "dsh",
             "--source",
@@ -192,6 +222,8 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.text, "写周报");
         assert_eq!(parsed.due.as_deref(), Some("2026-11-24"));
+        assert_eq!(parsed.start.as_deref(), Some("2026-11-24T09:00"));
+        assert_eq!(parsed.duration.as_deref(), Some("1小时"));
         assert_eq!(parsed.provider, "dsh");
         assert_eq!(parsed.source.as_deref(), Some("DeepSeek Harness"));
         assert!(parsed.pinned);

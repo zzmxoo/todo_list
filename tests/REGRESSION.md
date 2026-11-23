@@ -73,7 +73,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | --- | --- | --- | --- |
 | Rust 动画 | 缓动 smoothstep 端点、中点、单调性；位置插值端点 | 1f24eb0, e19e4d3 | `src-tauri/src/main.rs` mod tests |
 | Rust 自启动 | `reg add` / `reg delete` 参数指向同一个注册表值 | 3d70c65 | `src-tauri/src/main.rs` mod tests |
-| Rust AI | provider 别名与字段归一、日期默认 18:00、非法输入 | 2026-11-23 AI 接入 | `src-tauri/src/ai/providers.rs` tests |
+| Rust AI | provider 别名与字段归一、日期默认 18:00、会议 start+duration、跨午夜、非法输入 | 2026-11-23 AI 接入 | `src-tauri/src/ai/providers.rs` tests |
 | Rust AI | 收件箱去重、坏 JSON 隔离、合并 data.json | 2026-11-23 AI 接入 | `src-tauri/src/ai/inbox.rs` tests |
 | Rust AI | MCP initialize / tools/list / tools/call / 通知 | 2026-11-23 AI 接入 | `src-tauri/src/ai/mcp.rs` tests |
 | Rust AI | CLI `--add` 参数解析（空格与 = 两种写法） | 2026-11-23 AI 接入 | `src-tauri/src/ai/cli.rs` tests |

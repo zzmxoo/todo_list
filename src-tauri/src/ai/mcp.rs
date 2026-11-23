@@ -23,12 +23,16 @@ fn tools() -> Value {
     json!([
         {
             "name": "add_todo",
-            "description": "向桌面待办小组件添加一条待办。due 支持 YYYY-MM-DD（默认当天 18:00）或 ISO 时间。",
+            "description": "向桌面待办小组件添加一条待办。普通截止用 due；会议/事件用 start + duration_minutes（或 time + duration），会自动算结束时间。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "text": { "type": "string", "description": "待办内容，必填" },
+                    "text": { "type": "string", "description": "待办内容/会议名称，必填" },
                     "due": { "type": "string", "description": "截止时间，YYYY-MM-DD 或 ISO 8601" },
+                    "start": { "type": "string", "description": "会议/事件开始时间，YYYY-MM-DDTHH:MM 或 YYYY-MM-DD HH:MM" },
+                    "time": { "type": "string", "description": "会议开始时间的别名；配合 duration 使用" },
+                    "duration_minutes": { "type": "integer", "description": "时长（分钟）。会议示例：start 10:30 + 60 => 10:30–11:30" },
+                    "duration": { "type": "string", "description": "时长文本，如 1小时 / 90分钟；与 duration_minutes 二选一" },
                     "pinned": { "type": "boolean", "description": "是否置顶" },
                     "provider": { "type": "string", "description": "来源 id，如 deepseek-harness / workbuddy / doubao" },
                     "source": { "type": "string", "description": "来源显示名称，如 DeepSeek Harness" }
@@ -38,7 +42,7 @@ fn tools() -> Value {
         },
         {
             "name": "add_todos",
-            "description": "批量添加待办。todos 内每一项支持 text/due/pinned，外层可统一指定 provider/source。",
+            "description": "批量添加待办。todos 内每一项支持 text/due/start/duration_minutes/pinned，外层可统一指定 provider/source。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -49,6 +53,8 @@ fn tools() -> Value {
                             "properties": {
                                 "text": { "type": "string" },
                                 "due": { "type": "string" },
+                                "start": { "type": "string" },
+                                "duration_minutes": { "type": "integer" },
                                 "pinned": { "type": "boolean" }
                             },
                             "required": ["text"]
