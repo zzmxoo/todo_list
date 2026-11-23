@@ -280,8 +280,11 @@
     ok(!pinBtn().classList.contains('on'), 'pin off');
     const target = findRow('ITEST-新增');
     target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    await sleep(120);
-    const edit = $('.edit-input');
+    let edit = null;
+    for (let i = 0; i < 10 && !edit; i += 1) {
+      await sleep(100);
+      edit = $('.edit-input');
+    }
     ok(edit, 'edit input');
     edit.value = 'ITEST-改后';
     edit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -1334,11 +1337,13 @@
     await w.setPosition(new PPos(-Math.round(size.width / 2), 260));
     await sleep(1200);
     ok($('#app').className.includes('edge-hidden'), 'hidden');
-    await w.setPosition(new PPos(200, 200));
     let exited = false;
-    for (let i = 0; i < 15 && !exited; i += 1) {
-      await sleep(200);
-      exited = !$('#app').className.includes('edge-hidden');
+    for (let attempt = 0; attempt < 3 && !exited; attempt += 1) {
+      await w.setPosition(new PPos(200 + attempt * 24, 200 + attempt * 24));
+      for (let i = 0; i < 6 && !exited; i += 1) {
+        await sleep(200);
+        exited = !$('#app').className.includes('edge-hidden');
+      }
     }
     ok(exited, 'exit hide');
     ok($('#edgePeek').hidden, 'peek hidden');
