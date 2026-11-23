@@ -247,6 +247,24 @@
     return count + ' items';
   });
 
+  await t('[REG-45] AI 通过收件箱插入待办并显示来源', async () => {
+    // 测试脚本启动前用 --add 写了一条 ITEST-AI-INSERT；桌面端启动后应自动合并。
+    let row = null;
+    for (let i = 0; i < 30 && !row; i += 1) {
+      row = findRow('ITEST-AI-INSERT');
+      if (!row) await sleep(100);
+    }
+    ok(row, 'AI todo appears');
+    const tag = row.querySelector('.ai-tag');
+    ok(tag, 'AI source tag');
+    ok(/DeepSeek/.test(tag.textContent), 'source label: ' + tag.textContent);
+    ok(/DeepSeek/.test(tag.title), 'source tooltip: ' + tag.title);
+    row.querySelector('.act-btn.del').click();
+    await sleep(300);
+    ok(!findRow('ITEST-AI-INSERT'), 'AI todo deleted');
+    return tag.textContent;
+  });
+
   await t('[REG-03] 新增 / 置顶 / 编辑 / 删除待办', async () => {
     const row = await addTodo('ITEST-新增');
     ok(row, 'created');

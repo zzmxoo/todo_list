@@ -9,7 +9,7 @@
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-一条命令会：跑 Rust 纯函数单测 → 备份 `data.json` → 带 CDP 端口启动发布版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 33 条 UI 集成回归 → 恢复数据并重新启动常驻程序。
+一条命令会：构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 44 条 UI 集成回归 → 恢复数据并重新启动发布版。
 只想跑 UI 层可加 `-SkipUnits -SkipRust`；只跳过 Rust 可加 `-SkipRust`。集成脚本本身是 `tests/integration-page.js`。分层原则与“该写单元还是集成”的判断见 [`tests/TESTING.md`](TESTING.md)。
 
 ## 维护规则（每次修复 bug 必须做）
@@ -57,6 +57,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-31 | 收起状态下拖动窗口离开边缘即退出隐藏 | a8e7a08 | 收起状态下拖动窗口离开边缘即退出隐藏 |
 | REG-32 | 上边缘停留 2 秒收起；松开鼠标不复弹；顶部窄条半宽、两端圆弧 | fac3e7c, 5a12eb2 | 上边缘停留 2 秒收起，松开鼠标不复弹，顶部窄条半宽圆角 |
 | REG-33 | 托盘点击唤出边缘收起的主界面，5 秒后自动缩回 | fac7dbc | 托盘唤出后 5 秒自动收起 |
+| REG-45 | AI 通过 CLI/MCP 收件箱插入待办，列表显示来源标签 | 2026-11-23 AI 接入 | AI 通过收件箱插入待办并显示来源 |
 | REG-34 | 天气拉取失败后重新打开天气卡必须自动重试，不能停在「正在获取天气…」占位文案 | 本次修复 | 天气拉取失败后重新打开天气卡要自动重试，不能停在占位文案 |
 | REG-35 | 开机启动写入失败（断网 / 注册表被锁）时开关回滚，界面不能停在与实际不一致的状态 | 本次修复 | 开机启动写入失败时开关回滚，界面不能停在与实际不一致的状态 |
 | REG-36 | 保存失败（断网 / 磁盘异常）不能丢待办：内存保留，恢复后自动补写落盘 | 本次修复 | 保存失败不能丢待办：内存状态保留，恢复后下一次保存完整落盘 |
@@ -72,6 +73,10 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | --- | --- | --- | --- |
 | Rust 动画 | 缓动 smoothstep 端点、中点、单调性；位置插值端点 | 1f24eb0, e19e4d3 | `src-tauri/src/main.rs` mod tests |
 | Rust 自启动 | `reg add` / `reg delete` 参数指向同一个注册表值 | 3d70c65 | `src-tauri/src/main.rs` mod tests |
+| Rust AI | provider 别名与字段归一、日期默认 18:00、非法输入 | 2026-11-23 AI 接入 | `src-tauri/src/ai/providers.rs` tests |
+| Rust AI | 收件箱去重、坏 JSON 隔离、合并 data.json | 2026-11-23 AI 接入 | `src-tauri/src/ai/inbox.rs` tests |
+| Rust AI | MCP initialize / tools/list / tools/call / 通知 | 2026-11-23 AI 接入 | `src-tauri/src/ai/mcp.rs` tests |
+| Rust AI | CLI `--add` 参数解析（空格与 = 两种写法） | 2026-11-23 AI 接入 | `src-tauri/src/ai/cli.rs` tests |
 | 日历模型 | 跨月事项只保留本月片段 | a4808e4 | `unit-core.js` clipSegment、`unit-calendar.js` buildWeekSegments |
 | 日历模型 | 重叠事项逐行下排，最多 3 行，滚轮偏移与上下计数 | a4808e4 | `unit-core.js` layoutBands |
 | 日历模型 | +n 统一贴周日列，数字取每天隐藏条数的最大值 | f800968, 1fcc771 | `unit-core.js` badgePlacements |

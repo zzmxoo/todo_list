@@ -2,7 +2,7 @@
 
 Tauri v2 + WebView2 的 Windows 桌面待办小组件。前端是 `ui/` 下的纯 HTML/CSS/JS（无 Node 构建），Rust 命令在 `src-tauri/src/main.rs`。
 
-后续会话先读 [docs/HANDOFF.md](docs/HANDOFF.md)：包含原始需求、设计规范、关键决策、已知限制和发布流程。
+后续会话先读 [docs/HANDOFF.md](docs/HANDOFF.md)：包含原始需求、设计规范、关键决策、已知限制和发布流程。AI 接入（MCP / CLI / 收件箱）见 [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md)，实现集中在 `src-tauri/src/ai/`。
 
 ## 构建与运行
 

@@ -13,6 +13,21 @@ $prodExe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
 $data = Join-Path $env:APPDATA 'com.desktoptodo.widget\data.json'
 $backup = "$data.regress"
 
+function Stop-App {
+  # 测试版/发布版可能由管理员权限启动；失败时退回 WMI Terminate。
+  $procs = Get-Process -Name desktop-todo -ErrorAction SilentlyContinue
+  if ($procs) { $procs | Stop-Process -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Milliseconds 300
+  $left = Get-CimInstance Win32_Process -Filter "Name='desktop-todo.exe'" -ErrorAction SilentlyContinue
+  foreach ($proc in $left) {
+    Invoke-CimMethod -InputObject $proc -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null
+  }
+  Start-Sleep -Milliseconds 400
+}
+
+# 构建测试 exe 前先停掉正在运行的程序，否则 exe 被占用无法链接。
+Stop-App
+
 # 测试用 exe：编译期注入调试端口，产物隔离在 src-tauri\target-test\。
 # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 在 Edge/WebView2 158 起已失效，不能再依赖。
 $exe = & (Join-Path $PSScriptRoot 'build-test-exe.ps1') -Port $Port
@@ -54,8 +69,7 @@ function Report-Cases($result, [string]$prefix) {
 
 try {
   # 先停掉常驻程序，避免 cargo test 链接时被运行中的 exe 锁住。
-  Get-Process -Name desktop-todo -ErrorAction SilentlyContinue | Stop-Process -Force
-  Start-Sleep -Milliseconds 600
+  Stop-App
 
   if (-not $SkipRust) {
     # Rust 侧只测纯函数（缓动、插值、注册表命令参数），不启动窗口。
@@ -79,8 +93,10 @@ try {
     }
   }
 
-  Get-Process -Name desktop-todo -ErrorAction SilentlyContinue | Stop-Process -Force
-  Start-Sleep -Milliseconds 600
+  Stop-App
+  # 预置一条 AI 待办，供 REG-34 验证 CLI -> ai-inbox -> UI 链路
+  Start-Process -FilePath $exe -ArgumentList '--add','ITEST-AI-INSERT','--provider','dsh' -Wait
+  Start-Sleep -Milliseconds 500
   Start-Process $exe
   # 等 CDP 端口就绪
   $ready = $false
@@ -129,11 +145,20 @@ fetch('quotes.json')
   Report-Cases $result 'INTEGRATION'
 }
 finally {
-  Get-Process -Name desktop-todo -ErrorAction SilentlyContinue | Stop-Process -Force
-  Start-Sleep -Milliseconds 600
+  Stop-App
   if (Test-Path $backup) {
     Copy-Item $backup $data -Force
     Remove-Item $backup -Force
+  }
+  $inbox = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
+  if (Test-Path $inbox) {
+    Get-ChildItem $inbox -Filter '*.json' | ForEach-Object {
+      try {
+        if ((Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).text -eq 'ITEST-AI-INSERT') {
+          Remove-Item $_.FullName -Force
+        }
+      } catch { }
+    }
   }
   # 恢复常驻程序用发布版，不带调试端口
   if (Test-Path $prodExe) { Start-Process $prodExe }

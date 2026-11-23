@@ -66,6 +66,17 @@
   };
 
   const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const AI_PROVIDER_LABELS = {
+    "deepseek-harness": "DeepSeek",
+    deepseek: "DeepSeek",
+    dsh: "DeepSeek",
+    workbuddy: "WorkBuddy",
+    "work-buddy": "WorkBuddy",
+    wb: "WorkBuddy",
+    doubao: "豆包",
+    "豆包": "豆包",
+    "": "AI",
+  };
   const LUNAR_DAYS = [
     "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十",
     "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
@@ -533,6 +544,7 @@
 
     updateClock();
     tick();
+    await pullAiTodos();
     setInterval(tick, 1000);
     setInterval(updateRowStates, 15000);
     setInterval(() => { if (!weatherBusy) refreshWeather(); }, 30 * 60 * 1000);
@@ -1363,7 +1375,15 @@
       `<button class="act-btn due${todo.due ? " on" : ""}" data-act="due" title="设置结束时间">${ICON.clock}</button>` +
       `<button class="act-btn del" data-act="del" title="删除">${ICON.trash}</button>`;
 
-    row.append(mark, text, due, actions);
+    row.append(mark, text);
+    if (todo.source) {
+      const tag = document.createElement("span");
+      tag.className = "ai-tag";
+      tag.textContent = aiProviderLabel(todo);
+      tag.title = `由 ${todo.source} 添加`;
+      row.append(tag);
+    }
+    row.append(due, actions);
     return row;
   }
 
@@ -1406,6 +1426,61 @@
     state.todos.push(todo);
     commitTodos({ scrollBottom: true });
     return todo;
+  }
+
+  /* --------------------------------------------------------- AI 接入 */
+  let aiPullBusy = false;
+  let aiPullFailures = 0;
+  let aiNextAttempt = 0;
+
+  function aiProviderLabel(todo) {
+    const key = String(todo.provider || "").trim().toLowerCase();
+    return AI_PROVIDER_LABELS[key] || todo.source || "AI";
+  }
+
+  // 外部 MCP / CLI 把待办写入 ai-inbox；桌面端每秒合并一次。
+  // 同一 id 只加一次；失败时指数退避，避免磁盘异常时每秒刷 IPC。
+  async function pullAiTodos() {
+    if (aiPullBusy || Date.now() < aiNextAttempt) return;
+    aiPullBusy = true;
+    try {
+      const items = await invoke("drain_ai_todos");
+      if (!Array.isArray(items) || !items.length) {
+        aiPullFailures = 0;
+        aiNextAttempt = 0;
+        return;
+      }
+      let added = 0;
+      for (const item of items) {
+        const text = String(item && item.text ? item.text : "").trim();
+        const id = String(item && item.id ? item.id : "");
+        if (!text || !id) continue;
+        if (state.todos.some((todo) => todo.id === id)) continue;
+        state.todos.push({
+          id,
+          text,
+          done: false,
+          done_at: null,
+          pinned: !!item.pinned,
+          due: item.due || null,
+          start: null,
+          created: item.created || new Date().toISOString(),
+          source: String(item.source || ""),
+          provider: String(item.provider || ""),
+        });
+        added += 1;
+      }
+      aiPullFailures = 0;
+      aiNextAttempt = 0;
+      if (added) commitTodos({ scrollBottom: true });
+    } catch (err) {
+      aiPullFailures += 1;
+      if (aiPullFailures === 1) console.warn("drain_ai_todos failed", err);
+      const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(aiPullFailures - 1, 5)));
+      aiNextAttempt = Date.now() + delay;
+    } finally {
+      aiPullBusy = false;
+    }
   }
 
   function deleteTodo(id) {
@@ -2654,6 +2729,7 @@
   }
 
   function tick() {
+    pullAiTodos();
     updateClock();
     tickCount += 1;
     if (new Date().toDateString() !== lastDay) {

@@ -369,6 +369,26 @@ body.calendar-mode .todo-header #settingsBtn { margin-left: auto; }
   text-decoration-color: rgba(132, 148, 178, 0.6);
 }
 
+/* AI 来源标签：只在外部工具写入的待办上显示 */
+.ai-tag {
+  flex: 0 0 auto;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(91, 140, 255, 0.28);
+  background: rgba(91, 140, 255, 0.14);
+  color: #a9bdff;
+  font-size: 9px;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+body.minimal-mode .ai-tag {
+  font-size: 8.5px;
+  line-height: 13px;
+}
+
 .todo-row .due-label {
   flex: 0 0 96px;
   margin-left: 0;

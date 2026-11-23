@@ -96,6 +96,9 @@
       due: options.due || null,
       start: options.start || null,
       created,
+      // AI 接入来源；手动创建的待办为空字符串
+      source: options.source || "",
+      provider: options.provider || "",
     };
   }
 

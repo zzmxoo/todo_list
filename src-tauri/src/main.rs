@@ -1,5 +1,7 @@
 #![windows_subsystem = "windows"]
 
+mod ai;
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,6 +23,7 @@ fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let _guard = ai::inbox::lock_state();
     let path = data_dir(&app)?.join("data.json");
     if !path.exists() {
         return Ok(serde_json::Value::Null);
@@ -31,15 +34,16 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
+    let _guard = ai::inbox::lock_state();
     let path = data_dir(&app)?.join("data.json");
-    let tmp = path.with_extension("json.tmp");
-    let text = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
-    fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    if fs::rename(&tmp, &path).is_err() {
-        fs::copy(&tmp, &path).map_err(|e| e.to_string())?;
-        let _ = fs::remove_file(&tmp);
-    }
-    Ok(())
+    ai::write_json_atomic(&path, &state)
+}
+
+/// 把外部 AI 工具写进 ai-inbox 的待办合并进 data.json，返回本次新增项。
+/// 前端每秒调用一次；桌面端没运行时收件箱文件会保留到下次启动。
+#[tauri::command]
+fn drain_ai_todos(app: tauri::AppHandle) -> Result<Vec<ai::providers::AiTodo>, String> {
+    ai::inbox::drain(&data_dir(&app)?)
 }
 
 /// 选择背景图片并复制到应用数据目录，返回复制后的绝对路径。
@@ -368,6 +372,15 @@ fn set_taskbar_hidden(
 }
 
 fn main() {
+    // MCP / CLI 模式不启动窗口：AI 工具通过 stdio 或命令行写入待办。
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--mcp") {
+        std::process::exit(ai::mcp::run());
+    }
+    if let Some(code) = ai::cli::run(&args) {
+        std::process::exit(code);
+    }
+
     // 提高系统定时器精度到 1ms，保证 Rust 侧窗口动画的逐帧间隔均匀
     #[cfg(windows)]
     unsafe {
@@ -381,6 +394,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_state,
+            drain_ai_todos,
             pick_image,
             export_text,
             fetch_json,

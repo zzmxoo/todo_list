@@ -78,6 +78,11 @@
     eq(todo.due, '2026-11-18T09:00:00');
     eq(todo.start, null);
     ok(todo.created, 'created 自动填充');
+    eq(todo.source, '', '手动待办没有来源');
+    eq(todo.provider, '', '手动待办没有 provider');
+    const ai = api.createTodo({ text: 'AI 待办', source: 'DeepSeek', provider: 'dsh' });
+    eq(ai.source, 'DeepSeek');
+    eq(ai.provider, 'dsh');
   });
 
   test('applyDone 记录 / 清空完成时间且不修改原对象', () => {

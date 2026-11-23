@@ -162,6 +162,17 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 - 格式：每行 `创建时间，完成时间，内容`，时间格式 `yyyy-MM-dd HH:mm`，CRLF 换行。
 - 通过原生保存对话框导出 `.txt`；没有记录时按钮提示“暂无记录”。
 
+### 3.9 AI 接入
+
+- 外部 AI 工具（DeepSeek Harness、WorkBuddy、豆包等）通过 MCP stdio 或 CLI 写入待办。
+- MCP：`desktop-todo.exe --mcp`，提供 `add_todo`、`add_todos`、`list_todos`。
+- CLI：`desktop-todo.exe --add "..." [--due] [--provider] [--source] [--pinned]`。
+- 写入走 `%APPDATA%\com.desktoptodo.widget\ai-inbox\<id>.json` 收件箱；桌面端每秒 drain，按 id 去重后合并进 `data.json`。
+- 桌面端未运行时收件箱保留，下次启动合并；不监听端口、不联网。
+- 列表给 AI 待办显示来源标签；未知 provider 按通用字段解析。
+- 字段适配集中在 `src-tauri/src/ai/providers.rs` 的 `PROVIDERS`，新增客户端只加一条配置。
+- 详细配置见 [`docs/AI_INTEGRATION.md`](AI_INTEGRATION.md)。
+
 ## 4. 技术与设计约束（不要轻易打破）
 
 1. **无 Node 构建**：前端是直接加载的 HTML/CSS/JS；模块用 UMD 风格挂到 `window`。不要引入 React/Vue/Vite/Webpack/Vitest。
@@ -191,13 +202,19 @@ ui/
 
 src-tauri/
   src/main.rs         Tauri 命令、托盘、窗口动画、autostart、文件/HTTP
+  src/ai/
+    mod.rs            数据目录、id/时间、原子写、收件箱目录
+    providers.rs      provider 注册表与字段归一化
+    inbox.rs          ai-inbox 写入/扫描/去重/合并 data.json
+    mcp.rs            MCP stdio 服务（initialize/tools/list/tools/call）
+    cli.rs            --add 命令行模式
   tauri.conf.json     窗口、版本、安全、bundle 配置
   Cargo.toml          依赖与发布优化配置
 
 tests/
   regression.ps1      完整回归入口：Rust + JS 单测 + 数据 + UI 集成
   integration.ps1     只跑 UI 集成
-  integration-page.js 33 条 [REG-xx] UI 回归
+  integration-page.js 34 条 [REG-xx] UI 回归
   unit-*.js           40 条 JS 纯函数测试
   REGRESSION.md       历史问题 → 用例清单
   TESTING.md          分层测试策略
@@ -206,11 +223,13 @@ tests/
 _dev_cdp.ps1          CDP 执行 JS 的小工具（支持 -Expr / -ExprFile）
 _dev_capture.ps1      窗口截图辅助
 docs/HANDOFF.md       本文件
+docs/AI_INTEGRATION.md  AI 接入配置与扩展说明
 CLAUDE.md             给后续 Claude 会话的工作约定
 ```
 
 Tauri 命令：
-`load_state`、`save_state`、`pick_image`、`export_text`、`fetch_json`、`animate_window`、`cancel_window_anim`、`set_taskbar_hidden`、`get_autostart`、`set_autostart`。
+`load_state`、`save_state`、`drain_ai_todos`、`pick_image`、`export_text`、`fetch_json`、`animate_window`、`cancel_window_anim`、`set_taskbar_hidden`、`get_autostart`、`set_autostart`。
+进程模式：`--mcp`（stdio MCP 服务）、`--add`（命令行写入收件箱）。
 
 ## 6. 测试与回归
 
@@ -220,11 +239,11 @@ Tauri 命令：
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-- Rust：5 条（缓动、插值、注册表命令参数）
-- JS 单元：40 条（core / calendar / todo / domain / weather）
+- Rust：24 条（缓动、插值、注册表命令参数、AI provider 归一、收件箱、MCP）
+- JS 单元：46 条（core / calendar / todo / domain / weather）
 - 数据：名言 1313 条、无重复、字段完整
-- UI 集成：33 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附
-- 当前结果：**79 passed / 0 failed**
+- UI 集成：44 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入
+- 当前结果：**115 passed / 0 failed**（feature/suooprt_ai 分支）
 - 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序。
 - UI 测试通过 WebView2 CDP（端口 9222）在真实应用里执行；集成脚本超过 32KB，统一用临时文件传给 CDP。
 
