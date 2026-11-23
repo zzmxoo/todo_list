@@ -377,6 +377,9 @@ fn main() {
     if args.iter().any(|arg| arg == "--mcp") {
         std::process::exit(ai::mcp::run());
     }
+    if let Some(code) = ai::install::run(&args) {
+        std::process::exit(code);
+    }
     if let Some(code) = ai::cli::run(&args) {
         std::process::exit(code);
     }

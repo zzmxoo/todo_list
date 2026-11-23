@@ -167,6 +167,7 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 - 外部 AI 工具（DeepSeek Harness、WorkBuddy、豆包等）通过 MCP stdio 或 CLI 写入待办。
 - MCP：`desktop-todo.exe --mcp`，提供 `add_todo`、`add_todos`、`list_todos`。
 - CLI：`desktop-todo.exe --add "..." [--due] [--start] [--duration] [--provider] [--source] [--pinned]`。
+- 注册：`desktop-todo.exe --install-mcp workbuddy|dsh|generic [--exe <path>]`；WorkBuddy 写入本地插件市场（仍需用户点一次安装），DSH 生成配置片段，generic 输出 JSON。
 - 会议支持：`start` + `duration_minutes`（或 `time`/`due` + `duration`），服务端自动算结束时间；列表显示 `10:30–11:30`，日历按区间绘制。
 - 写入走 `%APPDATA%\com.desktoptodo.widget\ai-inbox\<id>.json` 收件箱；桌面端每秒 drain，按 id 去重后合并进 `data.json`。
 - 桌面端未运行时收件箱保留，下次启动合并；不监听端口、不联网。
@@ -240,11 +241,11 @@ Tauri 命令：
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-- Rust：28 条（缓动、插值、注册表命令参数、AI provider 归一、时长计算、收件箱、MCP）
+- Rust：32 条（缓动、插值、注册表命令参数、AI provider 归一、时长计算、收件箱、MCP、客户端注册）
 - JS 单元：46 条（core / calendar / todo / domain / weather）
 - 数据：名言 1313 条、无重复、字段完整
 - UI 集成：44 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入
-- 当前结果：**119 passed / 0 failed**（feature/support_ai 分支）
+- 当前结果：**123 passed / 0 failed**（feature/support_ai 分支）
 - 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序。
 - UI 测试通过 WebView2 CDP（端口 9222）在真实应用里执行；集成脚本超过 32KB，统一用临时文件传给 CDP。
 

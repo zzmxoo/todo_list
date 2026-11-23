@@ -77,6 +77,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | Rust AI | 收件箱去重、坏 JSON 隔离、合并 data.json | 2026-11-23 AI 接入 | `src-tauri/src/ai/inbox.rs` tests |
 | Rust AI | MCP initialize / tools/list / tools/call / 通知 | 2026-11-23 AI 接入 | `src-tauri/src/ai/mcp.rs` tests |
 | Rust AI | CLI `--add` 参数解析（空格与 = 两种写法） | 2026-11-23 AI 接入 | `src-tauri/src/ai/cli.rs` tests |
+| Rust AI | WorkBuddy 本地插件注册幂等、DSH 配置片段、通用 JSON | 2026-11-23 AI 接入 | `src-tauri/src/ai/install.rs` tests |
 | 日历模型 | 跨月事项只保留本月片段 | a4808e4 | `unit-core.js` clipSegment、`unit-calendar.js` buildWeekSegments |
 | 日历模型 | 重叠事项逐行下排，最多 3 行，滚轮偏移与上下计数 | a4808e4 | `unit-core.js` layoutBands |
 | 日历模型 | +n 统一贴周日列，数字取每天隐藏条数的最大值 | f800968, 1fcc771 | `unit-core.js` badgePlacements |

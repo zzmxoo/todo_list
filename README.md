@@ -49,7 +49,15 @@ desktop-todo.exe --add "整理周报" --due 2026-11-28 --provider dsh
 desktop-todo.exe --add "方案评审" --start "2026-11-27T10:30" --duration "1小时" --provider workbuddy
 ```
 
-AI 待办通过本地 `ai-inbox` 收件箱合并，桌面端没运行时也不会丢；列表会显示来源标签。配置示例、工具参数和新增客户端的扩展方式见 [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md)。
+AI 待办通过本地 `ai-inbox` 收件箱合并，桌面端没运行时也不会丢；列表会显示来源标签。可以一键把 MCP 服务注册到本地客户端：
+
+```powershell
+desktop-todo.exe --install-mcp workbuddy   # WorkBuddy 本地插件市场
+desktop-todo.exe --install-mcp dsh         # 生成 DSH 配置片段
+desktop-todo.exe --install-mcp generic     # 输出通用 MCP JSON
+```
+
+配置示例、工具参数和新增客户端的扩展方式见 [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md)。
 
 ## 开发与构建
 

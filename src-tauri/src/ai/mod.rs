@@ -15,6 +15,7 @@
 
 pub mod cli;
 pub mod inbox;
+pub mod install;
 pub mod mcp;
 pub mod providers;
 

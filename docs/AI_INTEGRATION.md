@@ -18,6 +18,30 @@ AI 客户端
 - 每个条目单独一个文件，写入使用临时文件 + rename，避免读到半截 JSON。
 - 列表中的 AI 待办会显示来源小标签（DeepSeek / WorkBuddy / 豆包 / AI）。
 
+## 一键注册（减少手工配置）
+
+MCP 没有“给一个 exe 路径就自动装进客户端”的标准协议；WorkBuddy / DSH 都需要在各自的配置或插件市场里登记服务。为了减少手工步骤，程序内置了注册命令：
+
+```powershell
+# WorkBuddy：写入它的本地插件市场，之后在 WorkBuddy 里点一次“安装/启用”
+desktop-todo.exe --install-mcp workbuddy
+
+# DeepSeek Harness：生成 cordis.patch.yml 片段
+desktop-todo.exe --install-mcp dsh
+
+# 通用 MCP 客户端：直接输出 JSON 配置
+desktop-todo.exe --install-mcp generic
+
+# 如果 exe 不在当前路径，可显式指定；注册的 command 会指向这个路径
+desktop-todo.exe --install-mcp workbuddy --exe "D:\Tools\Todos\src-tauri\target\release\desktop-todo.exe"
+```
+
+说明：
+
+- WorkBuddy：会创建 `~/.workbuddy/plugins/marketplaces/local/plugins/desktop-todo/`，并把条目加入本地市场的 `marketplace.json`（原文件备份为 `.bak-todo`）。插件仍需在 WorkBuddy 的“插件市场 → 本地”里点一次安装/启用，这是 MCP 客户端的安全边界，不建议静默安装外部进程。
+- DSH：如果检测到 `~/.dsh`，会生成 `~/.dsh/desktop-todo.mcp.yml`；把其中条目合并进 `~/.dsh/profiles/web/cordis.patch.yml` 后重启 dsh。未安装 DSH 时只打印片段。
+- 通用客户端：把输出的 `mcpServers` JSON 粘到对应配置文件即可。
+
 ## MCP 工具
 
 以 `--mcp` 启动后提供三个工具：

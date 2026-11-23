@@ -297,8 +297,11 @@
     const anchor = await addTodo('ITEST-草稿锚点');
     ok(anchor, 'anchor');
     click($('#addRow'));
-    await sleep(150);
-    const input = $('.add-input');
+    let input = null;
+    for (let i = 0; i < 10 && !input; i += 1) {
+      await sleep(100);
+      input = $('.add-input');
+    }
     ok(input, 'draft input');
     input.value = 'ITEST-草稿';
     input.dispatchEvent(new Event('input', { bubbles: true }));
