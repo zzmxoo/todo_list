@@ -86,7 +86,7 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 ### 3.3 设置
 
 - 右侧浮动面板：宽 404px，`position: absolute; right: 12px; top: 12px`；标题栏可拖动窗口。
-- 分页（左侧图标）：系统配置、界面配置、天气配置、关于。
+- 分页（左侧图标）：系统配置、界面配置、天气配置、AI 接入、关于。AI 页按 WorkBuddy / DeepSeek Harness / 豆包 展开显示接入方式，命令与 JSON 路径由 `get_ai_setup` 动态注入。
 - 系统配置顺序固定：
   1. 极简模式
   2. 日历模式
@@ -241,11 +241,11 @@ Tauri 命令：
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-- Rust：32 条（缓动、插值、注册表命令参数、AI provider 归一、时长计算、收件箱、MCP、客户端注册）
+- Rust：33 条（缓动、插值、注册表命令参数、AI provider 归一、时长计算、收件箱、MCP、客户端注册）
 - JS 单元：46 条（core / calendar / todo / domain / weather）
 - 数据：名言 1313 条、无重复、字段完整
 - UI 集成：44 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入
-- 当前结果：**123 passed / 0 failed**（feature/support_ai 分支）
+- 当前结果：**124 passed / 0 failed**（feature/support_ai 分支）
 - 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序。
 - UI 测试通过 WebView2 CDP（端口 9222）在真实应用里执行；集成脚本超过 32KB，统一用临时文件传给 CDP。
 

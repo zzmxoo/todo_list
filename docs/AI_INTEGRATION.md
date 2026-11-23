@@ -42,6 +42,10 @@ desktop-todo.exe --install-mcp workbuddy --exe "D:\Tools\Todos\src-tauri\target\
 - DSH：如果检测到 `~/.dsh`，会生成 `~/.dsh/desktop-todo.mcp.yml`；把其中条目合并进 `~/.dsh/profiles/web/cordis.patch.yml` 后重启 dsh。未安装 DSH 时只打印片段。
 - 通用客户端：把输出的 `mcpServers` JSON 粘到对应配置文件即可。
 
+## 应用内查看配置
+
+设置 → **AI 接入** 页会按 WorkBuddy / DeepSeek Harness / 豆包 三张卡片展开显示接入方式，并根据当前 exe 路径动态生成 MCP JSON、DSH 配置和豆包 CLI 示例，可直接复制使用。
+
 ## MCP 工具
 
 以 `--mcp` 启动后提供三个工具：

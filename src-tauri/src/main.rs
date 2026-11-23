@@ -39,6 +39,13 @@ fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), Str
     ai::write_json_atomic(&path, &state)
 }
 
+/// 设置页「AI 接入」使用：返回当前 exe 路径和可直接复制的配置片段。
+#[tauri::command]
+fn get_ai_setup() -> Result<serde_json::Value, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(ai::install::setup_info(&exe))
+}
+
 /// 把外部 AI 工具写进 ai-inbox 的待办合并进 data.json，返回本次新增项。
 /// 前端每秒调用一次；桌面端没运行时收件箱文件会保留到下次启动。
 #[tauri::command]
@@ -397,6 +404,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_state,
+            get_ai_setup,
             drain_ai_todos,
             pick_image,
             export_text,

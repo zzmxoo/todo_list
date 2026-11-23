@@ -459,6 +459,10 @@
     els.autostartSwitch = document.getElementById("autostartSwitch");
     els.taskbarSwitch = document.getElementById("taskbarSwitch");
     els.aboutVersion = document.getElementById("aboutVersion");
+    els.aiMcpJson = document.getElementById("aiMcpJson");
+    els.aiDshCommand = document.getElementById("aiDshCommand");
+    els.aiDshYaml = document.getElementById("aiDshYaml");
+    els.aiCliExample = document.getElementById("aiCliExample");
     els.minimalSwitch = document.getElementById("minimalSwitch");
     els.topSwitch = document.getElementById("topSwitch");
     els.cityInput = document.getElementById("cityInput");
@@ -499,6 +503,24 @@
       if (version) els.aboutVersion.textContent = version;
     } catch (err) {
       /* ignore */
+    }
+  }
+
+  async function loadAiSetup() {
+    if (!els.aiMcpJson) return;
+    try {
+      const info = await invoke("get_ai_setup");
+      if (!info || typeof info !== "object") return;
+      const set = (el, value) => {
+        if (el && value) el.textContent = String(value);
+      };
+      set(els.aiMcpJson, info.mcpJson);
+      set(els.aiDshCommand, info.dshCommand);
+      set(els.aiDshYaml, info.dshYaml);
+      set(els.aiCliExample, info.cliExample);
+    } catch (err) {
+      console.warn("get_ai_setup failed", err);
+      if (els.aiMcpJson) els.aiMcpJson.textContent = "读取配置失败，请查看 docs/AI_INTEGRATION.md";
     }
   }
 
@@ -553,6 +575,7 @@
     setTimeout(() => refreshWeather(), 350);
     holidayCheckToday();
     loadAppVersion();
+    loadAiSetup();
     invoke("get_autostart")
       .then((on) => {
         state.settings.autostart = !!on;

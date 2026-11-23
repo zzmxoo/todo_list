@@ -22,6 +22,20 @@ pub fn generic_config(exe: &Path) -> String {
     serde_json::to_string_pretty(&value).unwrap_or_default()
 }
 
+/// 设置页「AI 接入」用的动态内容：路径跟随当前 exe，避免安装目录变化后文案过期。
+pub fn setup_info(exe: &Path) -> Value {
+    let quoted = format!("\"{}\"", exe.to_string_lossy());
+    json!({
+        "exe": exe.to_string_lossy(),
+        "mcpJson": generic_config(exe),
+        "dshCommand": format!("{quoted} --install-mcp dsh"),
+        "dshYaml": dsh_config(exe),
+        "cliExample": format!(
+            "{quoted} --add \"方案评审\" --start \"2026-11-27T10:30\" --duration \"1小时\" --provider doubao"
+        )
+    })
+}
+
 fn write_plugin(exe: &Path, plugin_dir: &Path) -> Result<(), String> {
     let manifest_dir = plugin_dir.join(".codebuddy-plugin");
     fs::create_dir_all(&manifest_dir).map_err(|e| e.to_string())?;
@@ -256,6 +270,15 @@ mod tests {
         assert!(text.contains("mcpServers"));
         assert!(text.contains("--mcp"));
         assert!(text.contains("desktop-todo.exe"));
+    }
+
+    #[test]
+    fn setup_info_uses_current_exe_path() {
+        let info = setup_info(Path::new(r"D:\Apps\desktop-todo.exe"));
+        assert!(info["mcpJson"].as_str().unwrap().contains("--mcp"));
+        assert!(info["dshYaml"].as_str().unwrap().contains("cordis.patch.yml"));
+        assert!(info["cliExample"].as_str().unwrap().contains("--provider doubao"));
+        assert_eq!(info["exe"], r"D:\Apps\desktop-todo.exe");
     }
 
     #[test]

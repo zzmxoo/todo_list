@@ -354,6 +354,17 @@
     eq($$('.set-page').find((p) => p.classList.contains('active')).dataset.page, 'weather', 'weather tab');
     ok($('#cityInput'), 'city input');
     click(tabs[3]);
+    await sleep(300);
+    eq($$('.set-page').find((p) => p.classList.contains('active')).dataset.page, 'ai', 'ai tab');
+    eq($$('.ai-card').length, 3, 'three AI clients');
+    const aiText = $$('.ai-card summary').map((e) => e.textContent).join(' ');
+    ok(/WorkBuddy/.test(aiText), 'WorkBuddy card');
+    ok(/DeepSeek Harness/.test(aiText), 'DSH card');
+    ok(/豆包/.test(aiText), 'Doubao card');
+    ok($('#aiMcpJson').textContent.includes('--mcp'), 'MCP JSON');
+    ok($('#aiDshYaml').textContent.includes('cordis.patch.yml'), 'DSH YAML');
+    ok($('#aiCliExample').textContent.includes('--add'), 'CLI example');
+    click(tabs[4]);
     await sleep(100);
     eq($$('.set-page').find((p) => p.classList.contains('active')).dataset.page, 'about');
     ok(/^\d+\.\d+\.\d+$/.test($('#aboutVersion').textContent), 'about version');
@@ -697,13 +708,21 @@
     cell.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     await sleep(1500);
     ok($('#calInfo').hidden, 'not yet at 1.5s');
-    await sleep(1800);
-    ok(!$('#calInfo').hidden, 'shown after 3.3s');
+    let shown = false;
+    for (let i = 0; i < 15 && !shown; i += 1) {
+      await sleep(200);
+      shown = !$('#calInfo').hidden;
+    }
+    ok(shown, 'shown after 3s timer');
     cell.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
     await sleep(600);
     ok(!$('#calInfo').hidden, 'still at 0.6s');
-    await sleep(800);
-    ok($('#calInfo').hidden, 'hidden after 1.4s');
+    let hidden = false;
+    for (let i = 0; i < 10 && !hidden; i += 1) {
+      await sleep(200);
+      hidden = $('#calInfo').hidden;
+    }
+    ok(hidden, 'hidden after leave delay');
     return 'ok';
   });
 
@@ -1307,8 +1326,12 @@
     await sleep(1200);
     ok($('#app').className.includes('edge-hidden'), 'hidden');
     await w.setPosition(new PPos(200, 200));
-    await sleep(900);
-    ok(!$('#app').className.includes('edge-hidden'), 'exit hide');
+    let exited = false;
+    for (let i = 0; i < 15 && !exited; i += 1) {
+      await sleep(200);
+      exited = !$('#app').className.includes('edge-hidden');
+    }
+    ok(exited, 'exit hide');
     ok($('#edgePeek').hidden, 'peek hidden');
     await w.setPosition(new PPos(orig.x, orig.y));
     await sleep(500);

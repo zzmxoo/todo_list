@@ -49,7 +49,7 @@ desktop-todo.exe --add "整理周报" --due 2026-11-28 --provider dsh
 desktop-todo.exe --add "方案评审" --start "2026-11-27T10:30" --duration "1小时" --provider workbuddy
 ```
 
-AI 待办通过本地 `ai-inbox` 收件箱合并，桌面端没运行时也不会丢；列表会显示来源标签。可以一键把 MCP 服务注册到本地客户端：
+AI 待办通过本地 `ai-inbox` 收件箱合并，桌面端没运行时也不会丢；列表会显示来源标签。设置中的「AI 接入」页会按 WorkBuddy / DeepSeek Harness / 豆包 展开显示配置片段，也可以一键把 MCP 服务注册到本地客户端：
 
 ```powershell
 desktop-todo.exe --install-mcp workbuddy   # WorkBuddy 本地插件市场
