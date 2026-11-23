@@ -22,17 +22,28 @@ pub fn generic_config(exe: &Path) -> String {
     serde_json::to_string_pretty(&value).unwrap_or_default()
 }
 
+/// 设置页展示用：command 只写命令名，不写死本机安装路径。
+pub fn portable_mcp_config() -> String {
+    let value = json!({
+        "mcpServers": {
+            PLUGIN_NAME: {
+                "type": "stdio",
+                "command": "desktop-todo.exe",
+                "args": ["--mcp"]
+            }
+        }
+    });
+    serde_json::to_string_pretty(&value).unwrap_or_default()
+}
+
 /// 设置页「AI 接入」用的动态内容：路径跟随当前 exe，避免安装目录变化后文案过期。
 pub fn setup_info(exe: &Path) -> Value {
-    let quoted = format!("\"{}\"", exe.to_string_lossy());
     json!({
         "exe": exe.to_string_lossy(),
-        "mcpJson": generic_config(exe),
-        "dshCommand": format!("{quoted} --install-mcp dsh"),
-        "dshYaml": dsh_config(exe),
-        "cliExample": format!(
-            "{quoted} --add \"方案评审\" --start \"2026-11-27T10:30\" --duration \"1小时\" --provider doubao"
-        )
+        "mcpJson": portable_mcp_config(),
+        "dshCommand": "desktop-todo.exe --install-mcp dsh",
+        "dshYaml": dsh_config_with_command("desktop-todo.exe"),
+        "cliExample": "desktop-todo.exe --add \"方案评审\" --start \"2026-11-27T10:30\" --duration \"1小时\" --provider doubao"
     })
 }
 
@@ -121,7 +132,11 @@ fn yaml_quote(value: &str) -> String {
 }
 
 pub fn dsh_config(exe: &Path) -> String {
-    let command = yaml_quote(&exe.to_string_lossy());
+    dsh_config_with_command(&exe.to_string_lossy())
+}
+
+fn dsh_config_with_command(command: &str) -> String {
+    let command = yaml_quote(command);
     format!(
         "# 由 desktop-todo --install-mcp dsh 生成；把下面这一项合并进 ~/.dsh/profiles/web/cordis.patch.yml\n\
 - name: '@deepseek-ai/dsh-mcp-client'\n\
@@ -273,11 +288,13 @@ mod tests {
     }
 
     #[test]
-    fn setup_info_uses_current_exe_path() {
+    fn setup_info_uses_portable_command() {
         let info = setup_info(Path::new(r"D:\Apps\desktop-todo.exe"));
-        assert!(info["mcpJson"].as_str().unwrap().contains("--mcp"));
-        assert!(info["dshYaml"].as_str().unwrap().contains("cordis.patch.yml"));
-        assert!(info["cliExample"].as_str().unwrap().contains("--provider doubao"));
+        let mcp = info["mcpJson"].as_str().unwrap();
+        assert!(mcp.contains("\"command\": \"desktop-todo.exe\""), "mcp={mcp}");
+        assert!(!mcp.contains(r"D:\\Apps"), "must not hardcode install path");
+        assert!(info["dshYaml"].as_str().unwrap().contains("command: 'desktop-todo.exe'"));
+        assert!(info["cliExample"].as_str().unwrap().starts_with("desktop-todo.exe --add"));
         assert_eq!(info["exe"], r"D:\Apps\desktop-todo.exe");
     }
 

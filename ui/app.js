@@ -2782,7 +2782,10 @@
     });
 
     els.weatherPill.addEventListener("click", () => toggleWeather());
-    els.settingsBtn.addEventListener("click", () => openSettings());
+    els.settingsBtn.addEventListener("click", () => {
+      if (settingsOpen) closeSettings();
+      else openSettings();
+    });
   }
 
   // 待办：列表操作、添加、截止时间与日历添加弹窗

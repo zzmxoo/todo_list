@@ -362,6 +362,8 @@
     ok(/DeepSeek Harness/.test(aiText), 'DSH card');
     ok(/豆包/.test(aiText), 'Doubao card');
     ok($('#aiMcpJson').textContent.includes('--mcp'), 'MCP JSON');
+    ok($('#aiMcpJson').textContent.includes('"command": "desktop-todo.exe"'), 'portable command');
+    ok(!$('#aiMcpJson').textContent.includes('D:\\Tools'), 'no hardcoded install path');
     ok($('#aiDshYaml').textContent.includes('cordis.patch.yml'), 'DSH YAML');
     ok($('#aiCliExample').textContent.includes('--add'), 'CLI example');
     click(tabs[4]);
@@ -370,6 +372,13 @@
     ok(/^\d+\.\d+\.\d+$/.test($('#aboutVersion').textContent), 'about version');
     const appVersion = await window.__TAURI__.app.getVersion();
     eq($('#aboutVersion').textContent, appVersion, 'about matches app version');
+    // 再次点击设置图标也能关闭
+    click($('#settingsBtn'));
+    await sleep(500);
+    ok($('#settingsOverlay').hidden, 'settings icon toggles closed');
+    click($('#settingsBtn'));
+    await sleep(500);
+    ok(!$('#settingsOverlay').hidden, 'settings icon reopens');
     return 'ok';
   });
 

@@ -86,7 +86,7 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 ### 3.3 设置
 
 - 右侧浮动面板：宽 404px，`position: absolute; right: 12px; top: 12px`；标题栏可拖动窗口。
-- 分页（左侧图标）：系统配置、界面配置、天气配置、AI 接入、关于。AI 页按 WorkBuddy / DeepSeek Harness / 豆包 展开显示接入方式，命令与 JSON 路径由 `get_ai_setup` 动态注入。
+- 分页（左侧图标）：系统配置、界面配置、天气配置、AI 接入、关于。AI 页按 WorkBuddy / DeepSeek Harness / 豆包 展开显示接入方式，`command` 使用 `desktop-todo.exe` 通用写法（不写死本机路径）。再次点击标题栏设置图标可以关闭设置面板。
 - 系统配置顺序固定：
   1. 极简模式
   2. 日历模式

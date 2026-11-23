@@ -100,11 +100,13 @@ dsh 通过 `@deepseek-ai/dsh-mcp-client` 插件接 MCP，一个插件实例对�
 WorkBuddy 支持自定义 MCP 连接器（stdio 或 HTTP）。新增一个 stdio 连接器：
 
 - 名称：`desktop-todo`
-- 命令：`D:\Tools\Todos\src-tauri\target\release\desktop-todo.exe`
+- 命令：`desktop-todo.exe`（PATH 中可用；否则填实际安装路径）
 - 参数：`--mcp`
 - 传输：`stdio`
 
 保存并验证连接后，WorkBuddy 会自动发现 `add_todo` / `add_todos` / `list_todos`。如果是在其内置的 Agent/Skill 中调用，直接让 Agent 使用这些工具即可。
+
+自定义连接器 JSON 中的 `command` 可以只写 `desktop-todo.exe`（前提是程序目录在 PATH 中）；否则请替换成实际安装路径。设置页「AI 接入」展示的是不写死路径的通用版本。
 
 ### WorkBuddy 里怎样“按名字找到待办事项”
 
