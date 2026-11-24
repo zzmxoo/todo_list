@@ -1372,11 +1372,16 @@
     $('#app').dispatchEvent(
       new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true })
     );
-    await sleep(220);
+    await sleep(80);
+    ok($('#app').classList.contains('edge-showing'), 'mouse suppressed while revealing');
+    eq(getComputedStyle($('#app')).pointerEvents, 'none', 'pointer events disabled');
+    await sleep(160);
     const pos = await w.outerPosition();
     ok(pos.x > hidden.x + 40, 'immediate reveal: ' + pos.x);
     window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    await sleep(500);
+    await sleep(600);
+    ok(!$('#app').classList.contains('edge-showing'), 'mouse restored after reveal');
+    ok(getComputedStyle($('#app')).pointerEvents !== 'none', 'pointer events enabled');
     await w.setPosition(new PPos(200, 200));
     await sleep(800);
     await w.setPosition(new PPos(orig.x, orig.y));

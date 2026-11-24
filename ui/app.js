@@ -257,6 +257,7 @@
   let dragTimer = null;
   let moveSettleTimer = null;
   let edgeHide = null;
+  let edgeShowing = false;
   let edgeAnimToken = 0;
   let pendingAnimStart = null;
   let animStartListening = false;
@@ -1011,16 +1012,29 @@
   async function revealEdgeHide() {
     if (!edgeHide || edgeHide.revealed) return;
     edgeHide.revealed = true;
+    edgeShowing = true;
+    els.app.classList.add("edge-showing");
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
+    clearTimeout(edgeLeaveTimer);
+    edgeLeaveTimer = null;
     const edge = edgeHide.edge;
     prepareEdgeContent(edge, false);
     hideEdgePeek();
-    // 与 Rust 窗口动画同一帧启动，只做透明度过渡，避免缩放导致的合成抖动
-    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS, () =>
-      runEdgeContent(edge, false, EDGE_SHOW_ANIM_MS)
-    );
-    resetEdgeTransform();
+    try {
+      // 与 Rust 窗口动画同一帧启动，只做透明度过渡，避免缩放导致的合成抖动
+      await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS, () =>
+        runEdgeContent(edge, false, EDGE_SHOW_ANIM_MS)
+      );
+      // 等淡入也结束再恢复鼠标命中，避免弹出过程中 hover 状态闪烁
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.round(EDGE_SHOW_ANIM_MS * 0.12))
+      );
+    } finally {
+      edgeShowing = false;
+      els.app.classList.remove("edge-showing");
+      resetEdgeTransform();
+    }
   }
 
   async function concealEdgeHide() {
@@ -1039,6 +1053,8 @@
 
   function clearEdgeHide() {
     edgeHide = null;
+    edgeShowing = false;
+    els.app.classList.remove("edge-showing");
     edgeAnimToken += 1;
     edgeAnimating = null;
     clearTimeout(trayHideTimer);
@@ -3302,7 +3318,7 @@
       edgeLeaveTimer = null;
     });
     els.app.addEventListener("mouseleave", () => {
-      if (!edgeHide || !edgeHide.revealed) return;
+      if (!edgeHide || !edgeHide.revealed || edgeShowing) return;
       clearTimeout(edgeLeaveTimer);
       edgeLeaveTimer = setTimeout(() => {
         if (edgeHide && edgeHide.revealed) concealEdgeHide();

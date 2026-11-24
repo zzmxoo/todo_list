@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 1. 先加一条能复现旧问题的用例（单元或集成）；
 2. 在 `tests/REGRESSION.md` 登记问题、提交、用例位置；
 3. 修到用例通过；
-4. 提交前跑全量 `regression.ps1`。
+4. **日常小改动只跑相关用例**；合入 master / 打 tag 前跑全量 `regression.ps1`。
 
 `REGRESSION.md` 只是索引和维护清单，不是第二套测试实现。
 

@@ -73,6 +73,12 @@ body {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
+/* 弹出动画期间不响应鼠标，避免内容淡入时 hover 状态闪烁 */
+#app.edge-showing,
+#app.edge-showing * {
+  pointer-events: none !important;
+}
+
 #app.edge-hidden > *:not(.edge-peek),
 #app.edge-hidden > .top-row > * { opacity: 0; }
 

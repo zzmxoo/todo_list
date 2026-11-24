@@ -34,6 +34,7 @@ powershell -ExecutionPolicy Bypass -File tests\integration.ps1
 ## 修改规则
 
 - 修复任何 bug / 调整任何既有行为时，**必须先在 `tests/integration-page.js` 或对应 `unit-*.js` 增加能复现旧问题的用例**，再改代码，并在 `tests/REGRESSION.md` 登记（编号只增不改）。
-- 提交前跑 `tests\regression.ps1`，失败用例不允许提交。
+- 日常小改动只做针对性验证（相关单测/单条集成用例/手动确认），不要每次全量回归。
+- **合入 master、打 tag、发版前必须跑一次完整 `tests\regression.ps1`**，失败不允许合并或打 tag。
 - 待办写操作统一走 `app.js` 的 `commitTodos()`；业务纯函数放 `ui/core.js` 与 `ui/domain/*`，不要塞回 DOM 代码。
 - 用户数据在 `%APPDATA%\com.desktoptodo.widget\data.json`。测试会临时改动它，`regression.ps1` 负责恢复；手动调试时不要删除用户数据。

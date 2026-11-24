@@ -17,7 +17,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 1. **先补用例**：在 `tests/integration-page.js` 加一条 `[REG-新编号]`，或在对应 `unit-*.js` 加单元用例；用例要在**修复前**能复现失败。
 2. **再改代码**：修完后同一条用例必须通过。
 3. **登记清单**：在本文件表格补一行：问题、修复提交、用例名/文件、自动化方式。
-4. **全量回归**：提交前跑 `tests\regression.ps1`，不允许带着失败用例提交。
+4. **合入前全量**：日常小改动只跑相关用例；合入 master、打 tag 或发版前跑完整 `tests\regression.ps1`，不允许带着失败用例合并。
 5. 编号只增不改；删除旧行为时保留用例并改成断言“该行为已不存在”，不要直接删掉历史用例。
 
 ## UI / 集成回归（`tests/integration-page.js`）
