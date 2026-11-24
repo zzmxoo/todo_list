@@ -77,12 +77,13 @@ fn write_plugin(exe: &Path, plugin_dir: &Path) -> Result<(), String> {
 
 fn upsert_marketplace(manifest_path: &Path, plugin_dir_name: &str) -> Result<(), String> {
     let mut root: Value = if manifest_path.exists() {
+        let text = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
+        // 解析成功后再备份：解析失败时不留一个永远不会被使用的 .bak-todo。
+        let root = serde_json::from_str(&text)
+            .map_err(|e| format!("marketplace.json 解析失败，已中止且未修改：{e}"))?;
         let backup = manifest_path.with_extension("json.bak-todo");
         let _ = fs::copy(manifest_path, &backup);
-        let text = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
-        // 解析失败时不能当成空表重写：那会抹掉用户已有的其它插件注册。
-        serde_json::from_str(&text)
-            .map_err(|e| format!("marketplace.json 解析失败，已中止且未修改：{e}"))?
+        root
     } else {
         json!({ "plugins": [] })
     };

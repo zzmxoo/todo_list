@@ -249,9 +249,9 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 - 脚本自测：6 条（备份守卫：残留备份 / 跨脚本备份 / 空 / 损坏数据一律不覆盖）
 - JS 单元：47 条（core / calendar / todo / domain / weather，含待办归一保留 AI 来源）
 - 数据：名言 1313 条、无重复、字段完整
-- UI 集成：45 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入、损坏数据保护、编辑态保护
-- 当前结果：**139 passed / 0 failed / 0 skipped**（master 分支）
-- 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序；发现残留备份会中止，避免覆盖用户数据。
+- UI 集成：46 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入、损坏数据保护、编辑态保护、只读解除
+- 当前结果：**140 passed / 0 failed / 0 skipped**（fix/code-review 分支）
+- 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序；发现残留备份会中止，避免覆盖用户数据。REG-46 通过 `DESKTOP_TODO_DATA_DIR` 使用临时目录，不碰真实数据。
 - UI 测试通过 WebView2 CDP（端口 9222）在真实应用里执行；集成脚本超过 32KB，统一用临时文件传给 CDP。
 
 维护规则：

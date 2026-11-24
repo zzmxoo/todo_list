@@ -93,6 +93,7 @@
     badgePlacements,
     buildExportText,
     normalizeTodos,
+    newTodoId,
   } = window.TodoCore;
 
   // 节气弹框背景：深色渐变 + 节气名水印，按季节配一组颜色
@@ -446,6 +447,9 @@
     els.bgImage = document.getElementById("bgImage");
     els.edgePeek = document.getElementById("edgePeek");
     els.loadError = document.getElementById("loadError");
+    els.loadErrorText = document.getElementById("loadErrorText");
+    els.loadErrorOpen = document.getElementById("loadErrorOpen");
+    els.loadErrorRetry = document.getElementById("loadErrorRetry");
     els.settingsOverlay = document.getElementById("settingsOverlay");
     els.settingsPanel = document.getElementById("settingsPanel");
     els.settingsClose = document.getElementById("settingsClose");
@@ -531,32 +535,85 @@
     }
   }
 
+  function errorDetail(err) {
+    return typeof err === "string" ? err : (err && err.message) || String(err || "");
+  }
+
   function showLoadError(err) {
     if (!els.loadError) return;
-    const detail = typeof err === "string" ? err : (err && err.message) || String(err || "");
+    const detail = errorDetail(err);
     const corrupt = /损坏|corrupt/i.test(detail);
-    els.loadError.textContent = corrupt
-      ? "数据文件已损坏，已停止写入以免覆盖原文件。请先处理 data.json.corrupt-* 备份并重启程序；若正在运行回归测试，同时检查 data.json.regress / data.json.itest。"
-      : "数据文件读取失败，已停止写入以免覆盖原文件。请检查文件权限或磁盘后重启程序。";
-    if (detail) els.loadError.textContent += "（" + detail + "）";
+    loadFailed = true;
+    if (els.loadErrorText) {
+      els.loadErrorText.textContent = corrupt
+        ? "数据文件已损坏，已停止写入。请把 data.json.corrupt-* 改名为 data.json 后点「重试」（不要删除）；若正在跑回归，同时检查 data.json.regress / data.json.itest。"
+        : "数据文件读取失败，已停止写入以免覆盖原文件。请检查文件权限或磁盘后点「重试」。";
+      if (detail) els.loadErrorText.textContent += "（" + detail + "）";
+    }
     els.loadError.hidden = false;
+    els.loadError.dataset.reason = "load";
+    if (els.addRow) els.addRow.classList.add("disabled");
+    const body = els.settingsPanel && els.settingsPanel.querySelector(".settings-body");
+    if (body) body.inert = true;
+    if (els.todoList) renderTodos();
+    scheduleLayout();
+  }
+
+  function showFatalError(err) {
+    loadFailed = true;
+    const detail = errorDetail(err);
+    if (els.loadErrorText) els.loadErrorText.textContent = "启动失败，已停止写入以保护数据：" + detail;
+    if (els.loadError) {
+      els.loadError.hidden = false;
+      els.loadError.dataset.reason = "fatal";
+    }
+    const body = els.settingsPanel && els.settingsPanel.querySelector(".settings-body");
+    if (body) body.inert = true;
     if (els.addRow) els.addRow.classList.add("disabled");
   }
 
+  // 保存失败不能只进 console：连续失败时在顶部明确告知，恢复后自动收起。
+  function showSaveError() {
+    if (!els.loadError || loadFailed) return;
+    if (els.loadErrorText) {
+      els.loadErrorText.textContent =
+        "保存失败，最近的修改尚未写入磁盘，程序正在自动重试。请检查磁盘空间或文件权限。";
+    }
+    els.loadError.hidden = false;
+    els.loadError.dataset.reason = "save";
+    scheduleLayout();
+  }
+
+  function hideSaveError() {
+    if (!els.loadError || loadFailed) return;
+    if (els.loadError.dataset.reason !== "save") return;
+    els.loadError.hidden = true;
+    delete els.loadError.dataset.reason;
+    scheduleLayout();
+  }
+
+  function wireLoadErrorActions() {
+    if (els.loadErrorOpen) {
+      els.loadErrorOpen.addEventListener("click", () => {
+        invoke("reveal_data_dir").catch((err) => console.warn("reveal_data_dir failed", err));
+      });
+    }
+    if (els.loadErrorRetry) {
+      els.loadErrorRetry.addEventListener("click", () => window.location.reload());
+    }
+  }
+
   async function boot() {
-    cacheEls();
     try {
+      cacheEls();
+      wireLoadErrorActions();
       await bootMain();
     } catch (err) {
       // 启动阶段任何异常都不能让窗口停在 opacity:0：用户会看到一个点不到、
       // 也关不掉的隐形窗口。这里兜底显示错误并保持只读。
       console.error("boot failed", err);
-      loadFailed = true;
-      const detail = typeof err === "string" ? err : (err && err.message) || String(err || "");
-      if (els.loadError) {
-        els.loadError.textContent = "启动失败，已停止写入以保护数据：" + detail;
-        els.loadError.hidden = false;
-      }
+      showFatalError(err);
+    } finally {
       if (els.app) els.app.classList.add("ready");
     }
   }
@@ -679,9 +736,11 @@
         saveFailures = 0;
         clearTimeout(saveRetryTimer);
         saveRetryTimer = null;
+        hideSaveError();
       } catch (err) {
         saveFailures += 1;
         console.warn("save_state failed", err);
+        if (saveFailures >= 3) showSaveError();
         // 写盘失败不能只留在内存里：断网 / 磁盘被占用恢复后必须自动补写，
         // 否则用户这段时间的待办会在重启后全部丢失。
         clearTimeout(saveRetryTimer);
@@ -722,6 +781,7 @@
   }
 
   async function savePosition() {
+    if (loadFailed) return; // 只读期间位置也不落盘
     if (!win || settingsOpen) return;
     if (edgeHide) return; // 隐藏时保留进入隐藏前的位置
     try {
@@ -1289,6 +1349,10 @@
 
     const calendarOn = !!state.settings.calendar;
     const minimalOn = !calendarOn && !!state.settings.minimal;
+    // 告警条是正常流里的 flex 子项，窗口高度必须把它算进去，
+    // 否则错误态的底部「添加待办」会被 #app 的 overflow:hidden 裁掉。
+    const bannerH =
+      els.loadError && !els.loadError.hidden ? els.loadError.offsetHeight + 10 : 0;
     document.body.classList.toggle("calendar-mode", calendarOn);
     document.body.classList.toggle("minimal-mode", minimalOn);
     document.body.classList.toggle("weather-open", !calendarOn && !!state.settings.weather_open);
@@ -1304,7 +1368,7 @@
       await nextFrame();
       const avail = screenBounds();
       const width = Math.min(MARGIN * 2 + CAL_TODO_W + CAL_W, avail.right - avail.left);
-      const height = Math.min(MARGIN * 2 + CAL_H, avail.bottom - avail.top);
+      const height = Math.min(MARGIN * 2 + CAL_H + bannerH, avail.bottom - avail.top);
       await setWindowSize(width, height);
       await clampWindowPosition();
       return;
@@ -1337,7 +1401,7 @@
     }
 
     const width = MARGIN * 2 + todoW + (state.settings.weather_open ? GAP + WEATHER_W : 0);
-    const height = MARGIN * 2 + topH;
+    const height = MARGIN * 2 + topH + bannerH;
     await setWindowSize(width, height);
     await clampWindowPosition();
   }
@@ -1431,6 +1495,7 @@
     }
 
     // 已完成的事项不再显示在待办清单里（仍保留在数据与导出中）
+    const scrollTop = els.todoList.scrollTop;
     const list = sortTodos(state.todos).filter((todo) => !todo.done);
     els.todoList.innerHTML = "";
 
@@ -1449,11 +1514,14 @@
 
     const remaining = list.filter((todo) => !todo.done).length;
     els.count.textContent = list.length ? `${remaining} 项` : "";
+    els.todoList.scrollTop = scrollTop;
     renderCalendar();
   }
 
-  // 测试钩子：集成用例需要在不抢焦点的情况下触发一次后台重绘（REG-49）。
+  // 测试钩子：集成用例需要在不抢焦点的情况下触发一次后台重绘（REG-49），
+  // 以及直接进入只读态验证告警条与禁用状态（REG-57）。
   window.__TEST_RENDER_TODOS = renderTodos;
+  window.__TEST_LOAD_ERROR = showLoadError;
 
   function buildRow(todo) {
     const row = document.createElement("div");
@@ -1483,6 +1551,12 @@
       `<button class="act-btn pin${todo.pinned ? " on" : ""}" data-act="pin" title="${todo.pinned ? "取消置顶" : "置顶"}">${ICON.pin}</button>` +
       `<button class="act-btn due${todo.due ? " on" : ""}" data-act="due" title="设置结束时间">${ICON.clock}</button>` +
       `<button class="act-btn del" data-act="del" title="删除">${ICON.trash}</button>`;
+    if (loadFailed) {
+      actions.querySelectorAll("button").forEach((button) => {
+        button.disabled = true;
+        button.title = "数据文件异常，暂不可操作";
+      });
+    }
 
     row.append(mark, text);
     if (todo.source) {
@@ -1527,7 +1601,7 @@
   function addTodo(text, options = {}) {
     if (loadFailed) return null;
     const todo = createTodo({
-      id: crypto.randomUUID(),
+      id: newTodoId(),
       text,
       due: options.due,
       start: options.start,

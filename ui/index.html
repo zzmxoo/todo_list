@@ -11,7 +11,13 @@
   <div class="bg-image" id="bgImage" aria-hidden="true"></div>
   <div class="bg-shade" aria-hidden="true"></div>
   <div class="edge-peek" id="edgePeek" aria-hidden="true"></div>
-  <div class="load-error" id="loadError" role="alert" hidden></div>
+  <div class="load-error" id="loadError" role="alert" hidden>
+    <div class="load-error-text" id="loadErrorText"></div>
+    <div class="load-error-actions">
+      <button class="btn small ghost" id="loadErrorOpen" type="button">打开数据目录</button>
+      <button class="btn small primary" id="loadErrorRetry" type="button">重试</button>
+    </div>
+  </div>
 
   <div class="top-row">
     <section class="card todo-card" id="todoCard">

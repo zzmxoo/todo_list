@@ -5,13 +5,15 @@
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1
-#   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -Pfxn <证书.pfx> -Password <密码>
+#   $env:MSIX_CERT_PASSWORD = '...'
+#   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -Pfxn <证书.pfx>
 #
+# 口令优先读环境变量 MSIX_CERT_PASSWORD，避免出现在命令行参数里（同机可被 WMI 读到）。
 # 不传证书也能打出未签名包（供 Partner Center 或本地 sideload 测试用）。
 param(
   [string]$Exe,
   [string]$Pfxn,
-  [string]$Password,
+  [string]$Password = $env:MSIX_CERT_PASSWORD,
   [string]$Publisher = 'CN=DesktopTodo',
   [string]$PublisherDisplayName = 'DesktopTodo',
   [string]$IdentityName = '',

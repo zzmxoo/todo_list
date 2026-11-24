@@ -16,7 +16,12 @@ extern "system" {
 }
 
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // 集成测试用 DESKTOP_TODO_DATA_DIR 把数据目录隔离到临时目录，
+    // 避免 REG-46 这类故意写坏数据文件的用例碰用户真实数据。
+    let dir = match std::env::var_os("DESKTOP_TODO_DATA_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => app.path().app_data_dir().map_err(|e| e.to_string())?,
+    };
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -42,6 +47,25 @@ fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), Str
 fn get_ai_setup() -> Result<serde_json::Value, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     Ok(ai::install::setup_info(&exe))
+}
+
+/// 数据文件异常时，从告警条直接打开数据目录，避免用户自己摸路径。
+#[tauri::command]
+fn reveal_data_dir(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
+        Err("仅支持 Windows".into())
+    }
 }
 
 /// 把外部 AI 工具写进 ai-inbox 的待办合并进 data.json，返回本次新增项。
@@ -79,7 +103,12 @@ async fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .unwrap_or_default()
         .as_millis();
     let dst = dir.join(format!("bg-{stamp}.{ext}"));
-    fs::copy(&src, &dst).map_err(|e| e.to_string())?;
+    let src_copy = src.clone();
+    let dst_copy = dst.clone();
+    tauri::async_runtime::spawn_blocking(move || fs::copy(&src_copy, &dst_copy))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     Ok(Some(dst.to_string_lossy().to_string()))
 }
 
@@ -104,7 +133,11 @@ async fn export_text(default_name: String, content: String) -> Result<Option<Str
     } else {
         path
     };
-    fs::write(&path, content).map_err(|e| e.to_string())?;
+    let path_for_write = path.clone();
+    tauri::async_runtime::spawn_blocking(move || fs::write(&path_for_write, content))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
@@ -442,6 +475,28 @@ fn already_running() -> bool {
     unsafe { GetLastError() == ERROR_ALREADY_EXISTS }
 }
 
+/// 第二个实例直接退出会让人以为程序打不开（任务栏/托盘可能都被隐藏）。
+#[cfg(windows)]
+fn notify_already_running() {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: *mut c_void, text: *const u16, caption: *const u16, flags: u32) -> i32;
+    }
+    let text: Vec<u16> = "桌面待办已经在运行（可能在托盘或任务栏）。\0".encode_utf16().collect();
+    let caption: Vec<u16> = "桌面待办\0".encode_utf16().collect();
+    const MB_OK: u32 = 0x0;
+    const MB_ICONINFORMATION: u32 = 0x40;
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
 fn main() {
     // MCP / CLI 模式不启动窗口：AI 工具通过 stdio 或命令行写入待办。
     let args: Vec<String> = std::env::args().collect();
@@ -455,9 +510,10 @@ fn main() {
         std::process::exit(code);
     }
 
-    // 单实例：第二个进程直接退出，避免两个实例交替覆盖 data.json。
+    // 单实例：第二个进程提示后退出，避免两个实例交替覆盖 data.json。
     #[cfg(windows)]
     if already_running() {
+        notify_already_running();
         return;
     }
 
@@ -475,6 +531,7 @@ fn main() {
             load_state,
             save_state,
             get_ai_setup,
+            reveal_data_dir,
             drain_ai_todos,
             pick_image,
             export_text,

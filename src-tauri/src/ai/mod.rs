@@ -31,6 +31,11 @@ static AI_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 不依赖 Tauri AppHandle 的数据目录，供 `--mcp` / `--add` 进程使用。
 pub fn data_dir() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("DESKTOP_TODO_DATA_DIR") {
+        let dir = PathBuf::from(path);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        return Ok(dir);
+    }
     let base = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .ok_or_else(|| "APPDATA 未设置".to_string())?;

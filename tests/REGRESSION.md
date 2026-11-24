@@ -9,7 +9,7 @@
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-一条命令会：跑备份守卫自测 → 构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 45 条 UI 集成回归 + 1 条损坏数据端到端回归 → 恢复数据并重新启动发布版。
+一条命令会：跑备份守卫自测 → 构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 46 条 UI 集成回归 + 1 条损坏数据端到端回归 → 恢复数据并重新启动发布版。
 只想跑 UI 层可加 `-SkipUnits -SkipRust`；只跳过 Rust 可加 `-SkipRust`。集成脚本本身是 `tests/integration-page.js`。分层原则与“该写单元还是集成”的判断见 [`tests/TESTING.md`](TESTING.md)。
 
 ## 维护规则（每次修复 bug 必须做）
@@ -80,6 +80,11 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-54 | marketplace.json 解析失败时中止且不重写；`--install-mcp --exe x` 不把 flag 当客户端名 | 本次修复 | Rust `corrupt_marketplace_is_not_overwritten`、`take_value_rejects_following_flag` |
 | REG-55 | 节假日失败只冷却 10 分钟且 force 可重试；天气数据超过 3 小时标注「可能过期」；x/y 为 null 时窗口不贴左上角 | 本次修复 | 人工抽查（依赖时间 / 网络状态） |
 | REG-56 | CDP 连接、发送、接收都有超时；unit-*.js 自动发现；Release 先草稿后统一公开 | 本次修复 | `_dev_cdp.ps1`、脚本自动发现；workflow 人工核对 |
+| REG-57 | 只读告警提供「打开数据目录 / 重试」；提示改名而不是删除；设置面板 inert、待办操作禁用；告警条高度计入窗口布局 | 本次修复 | 只读告警提供解除入口，并禁用设置与待办操作 |
+| REG-58 | 保存连续失败时顶部明确提示，恢复后自动收起 | 本次修复 | REG-36 + 人工；`save()` 连续 3 次失败提示 |
+| REG-59 | REG-46 用临时数据目录 + 预置收件箱条目，不碰用户真实数据；旧实现会在 drain 时写出空壳 | 本次修复 | `regression.ps1` 的 REG-46（`DESKTOP_TODO_DATA_DIR`） |
+| REG-60 | 两套回归脚本互斥；集成用例下限 46；守卫自测至少 6 条 | 本次修复 | `regression.ps1` / `integration.ps1` 的命名互斥量与计数断言 |
+| REG-61 | MSIX 签名口令优先读环境变量，不再要求写进命令行 | 本次修复 | `build-msix.ps1`（人工核对调用方式） |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

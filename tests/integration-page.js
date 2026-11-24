@@ -358,42 +358,48 @@
   await t('[REG-49] 后台重绘保留行内编辑内容和列表滚动位置', async () => {
     // AI 收件箱每秒轮询会触发 commitTodos -> renderTodos；行内编辑不能被吞。
     const names = [];
-    for (let i = 0; i < 12; i += 1) {
-      const name = 'ITEST-滚动-' + i;
-      await addTodo(name);
-      names.push(name);
+    try {
+      for (let i = 0; i < 12; i += 1) {
+        const name = 'ITEST-滚动-' + i;
+        await addTodo(name);
+        names.push(name);
+      }
+      const list = $('#todoList');
+      list.scrollTop = 30;
+      await sleep(120);
+      const scrollBefore = list.scrollTop;
+      // 窗口较矮 / 行高较大时仍应可滚；不可滚就明确 skip，而不是让断言误红。
+      if (scrollBefore <= 0) return 'skip: list not scrollable';
+
+      const target = findRow(names[0]);
+      target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      let input = null;
+      for (let i = 0; i < 10 && !input; i += 1) {
+        await sleep(80);
+        input = $('.edit-input');
+      }
+      ok(input, 'edit input');
+      input.value = 'ITEST-编辑中';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+
+      window.__TEST_RENDER_TODOS();
+      await sleep(150);
+      const kept = $('.edit-input');
+      ok(kept, 'edit input preserved after re-render');
+      eq(kept.value, 'ITEST-编辑中', 'edit value preserved');
+      ok(
+        list.scrollTop >= scrollBefore - 1,
+        'scroll preserved: ' + list.scrollTop + ' vs ' + scrollBefore
+      );
+      return 'edit+scroll preserved';
+    } finally {
+      const active = $('.edit-input');
+      if (active) {
+        active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await sleep(150);
+      }
+      for (const name of names) await deleteTodo(name);
     }
-    const list = $('#todoList');
-    list.scrollTop = 30;
-    await sleep(120);
-    const scrollBefore = list.scrollTop;
-    ok(scrollBefore > 0, 'list is scrollable: ' + scrollBefore);
-
-    const target = findRow(names[0]);
-    target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    let input = null;
-    for (let i = 0; i < 10 && !input; i += 1) {
-      await sleep(80);
-      input = $('.edit-input');
-    }
-    ok(input, 'edit input');
-    input.value = 'ITEST-编辑中';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-
-    window.__TEST_RENDER_TODOS();
-    await sleep(150);
-    const kept = $('.edit-input');
-    ok(kept, 'edit input preserved after re-render');
-    eq(kept.value, 'ITEST-编辑中', 'edit value preserved');
-    ok(
-      list.scrollTop >= scrollBefore - 1,
-      'scroll preserved: ' + list.scrollTop + ' vs ' + scrollBefore
-    );
-
-    kept.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await sleep(150);
-    for (const name of names) await deleteTodo(name);
-    return 'edit+scroll preserved';
   });
 
   await t('[REG-05] 设置分类顺序、页面切换与关于版本', async () => {
@@ -1649,6 +1655,32 @@
       blocked = false;
       window.__TEST_INVOKE = null;
     }
+  });
+
+  await t('[REG-57] 只读告警提供解除入口，并禁用设置与待办操作', async () => {
+    window.__TEST_LOAD_ERROR('data.json 已损坏，原文件已保留为 data.json.corrupt-1');
+    await sleep(600);
+    ok(!$('#loadError').hidden, 'banner visible');
+    const text = $('#loadErrorText').textContent;
+    ok(/改名/.test(text), 'tells user to rename: ' + text);
+    ok(/不要删除/.test(text), 'warns not to delete: ' + text);
+    ok($('#loadErrorOpen') && $('#loadErrorRetry'), 'recovery buttons');
+    ok($('#addRow').classList.contains('disabled'), 'add row disabled');
+    // 告警条占高度后窗口必须变高，底部添加行不能被 overflow:hidden 裁掉。
+    const addRect = $('#addRow').getBoundingClientRect();
+    const appRect = $('#app').getBoundingClientRect();
+    ok(
+      addRect.bottom <= appRect.bottom + 1,
+      'add row clipped: ' + addRect.bottom + ' > ' + appRect.bottom
+    );
+    const act = $('.todo-row .act-btn');
+    ok(!act || act.disabled, 'todo action disabled');
+    click($('#settingsBtn'));
+    await sleep(350);
+    ok($('#settingsPanel .settings-body').inert, 'settings body inert');
+    click($('#settingsDone'));
+    await sleep(150);
+    return 'read-only ui, banner in layout';
   });
 
   const passed = results.filter((r) => r.ok && !r.skipped).length;

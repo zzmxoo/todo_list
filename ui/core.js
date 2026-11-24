@@ -166,5 +166,6 @@
     opacityFromTransparency,
     transparencyFromOpacity,
     normalizeTodos,
+    newTodoId,
   };
 });

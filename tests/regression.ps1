@@ -7,6 +7,13 @@ param(
   [switch]$SkipRust
 )
 $ErrorActionPreference = 'Stop'
+
+# 两套回归脚本共用命名互斥量，避免同时抢 CDP 端口和同一 data 目录。
+$regressionMutex = New-Object System.Threading.Mutex($false, 'Local\TodoRegression')
+$owned = $false
+try { $owned = $regressionMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { throw '另一个回归进程正在运行（integration.ps1 / regression.ps1），请等待其结束。' }
+
 $root = Split-Path $PSScriptRoot -Parent
 $cdp = Join-Path $root '_dev_cdp.ps1'
 $prodExe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
@@ -27,6 +34,11 @@ if ($LASTEXITCODE -ne 0 -and $failed -eq 0) {
   $failed += 1
   'FAIL  regress-lib self-test'
 }
+# 子进程空跑 / 用例被注释但 exit 0 时，计数会是 0；必须要求最低条数。
+if ($passed -lt 6) {
+  $failed += 1
+  "FAIL  regress-lib self-test only $passed cases, expected at least 6"
+}
 if ($failed -gt 0) {
   "REGRESSION pass=$passed fail=$failed skip=$skipped"
   exit 1
@@ -46,8 +58,6 @@ function Stop-App {
 
 $exe = $null
 $backupCreated = $false
-$corruptTestRan = $false
-$corruptBeforeNames = @()
 
 function Eval-Expr([string]$expr) {
   # Windows 命令行上限约 32KB，集成脚本已超过，统一走临时文件传递。
@@ -170,24 +180,30 @@ fetch('quotes.json')
   if (-not $value) { throw 'integration script did not return results' }
   $result = $value | ConvertFrom-Json
   Report-Cases $result 'INTEGRATION'
-  if (@($result.results).Count -lt 44) {
+  if (@($result.results).Count -lt 46) {
     $failed += 1
-    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least 44"
+    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least 46"
   }
 
-  # REG-46 端到端：损坏的 data.json 不能在前端被静默写成空清单。
+  # REG-46 端到端：损坏的 data.json 不能被静默写成空壳。
+  # 用临时数据目录 + 预置 ai-inbox 条目，完全不碰用户真实数据；
+  # 旧实现会在 drain 时写出只含 AI 条目的 data.json，判别力比等定时保存更强。
   Stop-App
-  $corruptBeforeNames = @(Get-ChildItem -LiteralPath (Split-Path $data) -Filter 'data.json.corrupt-*' -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
-  $corruptTestRan = $true
-  [System.IO.File]::WriteAllText($data, '{ broken json', (New-Object System.Text.UTF8Encoding($false)))
-  Start-Process $exe
-  $ready = $false
-  for ($i = 0; $i -lt 30; $i++) {
-    Start-Sleep -Milliseconds 500
-    try { Invoke-RestMethod "http://127.0.0.1:$Port/json" | Out-Null; $ready = $true; break } catch { }
-  }
-  if (-not $ready) { throw "CDP port $Port not ready for corrupt-data test" }
-  $corruptExpr = @'
+  $probeDir = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-corrupt-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $probeDir | Out-Null
+  try {
+    $env:DESKTOP_TODO_DATA_DIR = $probeDir
+    Start-Process -FilePath $exe -ArgumentList '--add','ITEST-CORRUPT-PROBE','--provider','dsh' -Wait
+    $probeData = Join-Path $probeDir 'data.json'
+    [System.IO.File]::WriteAllText($probeData, '{ broken json', (New-Object System.Text.UTF8Encoding($false)))
+    Start-Process $exe
+    $ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
+      Start-Sleep -Milliseconds 500
+      try { Invoke-RestMethod "http://127.0.0.1:$Port/json" | Out-Null; $ready = $true; break } catch { }
+    }
+    if (-not $ready) { throw "CDP port $Port not ready for corrupt-data test" }
+    $corruptExpr = @'
 (async () => {
   const err = document.getElementById('loadError');
   const app = document.getElementById('app');
@@ -198,20 +214,23 @@ fetch('quotes.json')
   });
 })()
 '@
-  $corruptUi = (Eval-Expr $corruptExpr) | ConvertFrom-Json
-  # 给前端几个保存周期，确认没有把默认空状态写回磁盘。
-  Start-Sleep -Milliseconds 2600
-  $recreated = Test-Path -LiteralPath $data
-  $newCorrupt = @(Get-ChildItem -LiteralPath (Split-Path $data) -Filter 'data.json.corrupt-*' -ErrorAction SilentlyContinue | Where-Object { $corruptBeforeNames -notcontains $_.Name })
-  $kept = $newCorrupt.Count -gt 0
-  if ($corruptUi.visible -and $corruptUi.ready -and $kept -and -not $recreated) {
-    $passed += 1
-    'PASS  [REG-46] data.json 损坏时显示告警、保留原文件且前端不写盘  [corrupt kept]'
-  } else {
-    $failed += 1
-    "FAIL  [REG-46] data.json 损坏保护: visible=$($corruptUi.visible) ready=$($corruptUi.ready) kept=$kept recreated=$recreated text=$($corruptUi.text)"
+    $corruptUi = (Eval-Expr $corruptExpr) | ConvertFrom-Json
+    Start-Sleep -Milliseconds 2600
+    $recreated = Test-Path -LiteralPath $probeData
+    $kept = @(Get-ChildItem -LiteralPath $probeDir -Filter 'data.json.corrupt-*' -ErrorAction SilentlyContinue).Count -gt 0
+    $inboxKept = @(Get-ChildItem -LiteralPath (Join-Path $probeDir 'ai-inbox') -Filter '*.json' -ErrorAction SilentlyContinue).Count -gt 0
+    if ($corruptUi.visible -and $corruptUi.ready -and $kept -and -not $recreated -and $inboxKept) {
+      $passed += 1
+      'PASS  [REG-46] data.json 损坏时显示告警、保留原文件且不写盘  [corrupt kept, inbox kept]'
+    } else {
+      $failed += 1
+      "FAIL  [REG-46] data.json 损坏保护: visible=$($corruptUi.visible) ready=$($corruptUi.ready) kept=$kept recreated=$recreated inboxKept=$inboxKept text=$($corruptUi.text)"
+    }
+  } finally {
+    Stop-App
+    Remove-Item Env:DESKTOP_TODO_DATA_DIR -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $probeDir -Recurse -Force -ErrorAction SilentlyContinue
   }
-  Stop-App
 }
 finally {
   Stop-App
@@ -223,17 +242,6 @@ finally {
       $failed += 1
       "FAIL  恢复用户数据失败：$($_.Exception.Message)"
       "      备份保留在 $backup，请人工确认后再运行回归"
-    }
-  }
-  # REG-46 的清理也放在 finally：中途断言或 CDP 失败时不留下损坏副本。
-  if ($corruptTestRan) {
-    $createdCorrupt = @(Get-ChildItem -LiteralPath (Split-Path $data) -Filter 'data.json.corrupt-*' -ErrorAction SilentlyContinue | Where-Object { $corruptBeforeNames -notcontains $_.Name })
-    foreach ($item in $createdCorrupt) {
-      Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue
-    }
-    # 本次测试前没有用户数据时，data.json 是测试写坏的占位文件，直接删掉。
-    if (-not $backupCreated) {
-      Remove-Item -LiteralPath $data -Force -ErrorAction SilentlyContinue
     }
   }
   $inbox = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
@@ -248,7 +256,12 @@ finally {
   }
   # 恢复常驻程序用发布版，不带调试端口
   if (Test-Path $prodExe) { Start-Process $prodExe }
+  try { $regressionMutex.ReleaseMutex() } catch { }
+  $regressionMutex.Dispose()
 }
 
+if ($skipped -gt 0) {
+  "WARN  $skipped case(s) skipped（网络 / 显示器不满足），不计入失败，但本次全绿不代表这些用例已执行"
+}
 "REGRESSION pass=$passed fail=$failed skip=$skipped"
 if ($failed -gt 0) { exit 1 }

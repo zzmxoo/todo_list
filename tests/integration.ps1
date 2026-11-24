@@ -1,5 +1,12 @@
 ﻿param([int]$Port = 9222)
 $ErrorActionPreference = 'Stop'
+
+# 与 regression.ps1 共用命名互斥量，避免同时抢 CDP 端口和同一 data 目录。
+$regressionMutex = New-Object System.Threading.Mutex($false, 'Local\TodoRegression')
+$owned = $false
+try { $owned = $regressionMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { throw '另一个回归进程正在运行（integration.ps1 / regression.ps1），请等待其结束。' }
+
 $root = Split-Path $PSScriptRoot -Parent
 $cdp = Join-Path $root '_dev_cdp.ps1'
 $data = Join-Path $env:APPDATA 'com.desktoptodo.widget\data.json'
@@ -71,9 +78,12 @@ try {
   }
   "INTEGRATION pass=$($result.passed) fail=$($result.failed) skip=$($result.skipped)"
   $failed = [int]$result.failed
-  if (@($result.results).Count -lt 44) {
+  if (@($result.results).Count -lt 46) {
     $failed += 1
-    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least 44"
+    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least 46"
+  }
+  if ([int]$result.skipped -gt 0) {
+    "WARN  $($result.skipped) case(s) skipped（网络 / 显示器不满足），本次全绿不代表这些用例已执行"
   }
   if ($failed -gt 0) { exit 1 }
 } finally {
@@ -100,5 +110,7 @@ try {
   # 恢复常驻程序（用发布版 exe，不是测试版）
   $prodExe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
   if (Test-Path $prodExe) { Start-Process $prodExe }
+  try { $regressionMutex.ReleaseMutex() } catch { }
+  $regressionMutex.Dispose()
   if ($restoreFailed) { throw "恢复用户数据失败，备份保留在 $backup" }
 }
