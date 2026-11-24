@@ -862,12 +862,13 @@
   }
 
   /** 内容缩放/淡入淡出交给 CSS transition（合成器执行），由 Rust 动画开始事件触发 */
-  function prepareEdgeContent(edge) {
+  function prepareEdgeContent(edge, hiding = true) {
     if (!els.app) return;
     els.app.style.transition = "none";
     els.app.style.transformOrigin = edgeOrigin(edge);
-    els.app.style.transform = "scale(0.72)";
-    els.app.style.opacity = "0.12";
+    // 弹出只做淡入，缩放会触发整页重新栅格化，在 WebView 上容易出现轻微抖动
+    els.app.style.transform = hiding ? "scale(0.72)" : "scale(1)";
+    els.app.style.opacity = hiding ? "0.12" : "0.35";
   }
 
   function runEdgeContent(edge, hiding, duration) {
@@ -875,7 +876,10 @@
     // 略长于窗口位移，避免系统繁忙时窗口晚到、内容已提前放大完导致跳一下
     const ms = Math.max(120, Math.round(duration * 1.1));
     els.app.style.transformOrigin = edgeOrigin(edge);
-    els.app.style.transition = `transform ${ms}ms cubic-bezier(0.45, 0, 0.55, 1), opacity ${ms}ms cubic-bezier(0.45, 0, 0.55, 1)`;
+    const easing = "cubic-bezier(0.45, 0, 0.55, 1)";
+    els.app.style.transition = hiding
+      ? `transform ${ms}ms ${easing}, opacity ${ms}ms ${easing}`
+      : `opacity ${ms}ms ${easing}`;
     els.app.style.transform = hiding ? "scale(0.72)" : "scale(1)";
     els.app.style.opacity = hiding ? "0.12" : "1";
   }
@@ -1010,11 +1014,12 @@
     clearTimeout(edgeRevealTimer);
     edgeRevealTimer = null;
     const edge = edgeHide.edge;
-    prepareEdgeContent(edge);
+    prepareEdgeContent(edge, false);
     hideEdgePeek();
-    // 先启动内容展开，再让 Rust 移动窗口：避免 IPC 往返造成“先卡一下再弹”
-    runEdgeContent(edge, false, EDGE_SHOW_ANIM_MS);
-    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
+    // 与 Rust 窗口动画同一帧启动，只做透明度过渡，避免缩放导致的合成抖动
+    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS, () =>
+      runEdgeContent(edge, false, EDGE_SHOW_ANIM_MS)
+    );
     resetEdgeTransform();
   }
 
