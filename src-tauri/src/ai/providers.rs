@@ -411,7 +411,7 @@ pub fn normalize(provider_hint: &str, input: &Value) -> Result<AiTodo, String> {
         .or_else(|| input.get("important").and_then(Value::as_bool))
         .unwrap_or(false);
 
-    let canonical = if std::ptr::eq(spec, &GENERIC) && !hint.is_empty() {
+    let canonical = if spec.id == "generic" && !hint.is_empty() {
         cap_chars(&hint.to_ascii_lowercase(), 40)
     } else {
         spec.id.to_string()

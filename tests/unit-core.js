@@ -195,6 +195,24 @@
     ok(core.opacityFromTransparency(0.5) > 0.7, '50% 应保持较高不透明度');
   });
 
+  test('normalizeTodos 保留 AI 来源字段并补默认值', () => {
+    const list = core.normalizeTodos([
+      { id: 'a', text: 'AI 待办', source: 'WorkBuddy', provider: 'workbuddy' },
+      { text: '普通待办' },
+      null,
+      { text: 3 },
+    ]);
+    eq(list.length, 2);
+    eq(list[0].source, 'WorkBuddy');
+    eq(list[0].provider, 'workbuddy');
+    eq(list[0].done, false);
+    eq(list[0].done_at, null);
+    eq(list[0].pinned, false);
+    eq(list[1].source, null);
+    eq(list[1].provider, null);
+    ok(typeof list[1].id === 'string' && list[1].id.length > 0, 'generated id');
+  });
+
   const passed = results.filter((r) => r.ok).length;
   return JSON.stringify({ passed: passed, failed: results.length - passed, results: results });
 })()

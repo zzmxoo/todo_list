@@ -9,7 +9,7 @@
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-一条命令会：构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 44 条 UI 集成回归 → 恢复数据并重新启动发布版。
+一条命令会：跑备份守卫自测 → 构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 45 条 UI 集成回归 + 1 条损坏数据端到端回归 → 恢复数据并重新启动发布版。
 只想跑 UI 层可加 `-SkipUnits -SkipRust`；只跳过 Rust 可加 `-SkipRust`。集成脚本本身是 `tests/integration-page.js`。分层原则与“该写单元还是集成”的判断见 [`tests/TESTING.md`](TESTING.md)。
 
 ## 维护规则（每次修复 bug 必须做）
@@ -42,6 +42,11 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-16 | 双击日期格弹出添加待办 | a4808e4 | 双击日期格弹出添加待办 |
 | REG-17 | 右键日期格立即显示农历、名言等信息 | a4808e4, 8c7b30d | 右键立即显示日期信息（含农历与名言） |
 | REG-18 | 日期格悬停 3 秒显示，离开 1.2 秒消失 | 8c7b30d | 悬停 3 秒显示，离开 1.2 秒消失 |
+| REG-40 | 单击日期格弹出的信息停留时间足够移动到弹框上，悬停期间不消失，拖动窗口不误触发 | 2026-11-23 | 单击日期格弹出信息，停留时间够移动到弹框上 |
+| REG-41 | 定位成功后显示城市名而不是「当前位置」 | 2026-11-23 | 定位后显示城市名 |
+| REG-42 | IP 定位可独立提供城市名与经纬度 | 2026-11-23 | IP 定位提供城市名与坐标 |
+| REG-43 | 定位有多路备用服务（IP 定位 + 逆地理编码） | 2026-11-23 | 定位备用服务链路 |
+| REG-44 | 定位失败时设置面板提示，并可手动输入城市 | 2026-11-23 | 定位失败提示与手动输入 |
 | REG-19 | 节气当天显示节气名与专属背景 | 61af81b | 节气当天显示节气名与背景 |
 | REG-20 | 法定节假日多天假期的每一天都标注假期名，并有假期底色 | 61af81b | 法定节假日每一天都标注假期名与底色 |
 | REG-21 | 日历可退回普通模式 | 605faec | 日历退回普通模式 |
@@ -64,6 +69,17 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-38 | 天气错误分类：HTTP 4xx 不算断网（不能因此停用日历悬浮信息），网络错误才算并触发重试 | 本次修复 | 天气错误分类：HTTP 4xx 不算断网，网络错误才算 |
 | REG-39 | 名言库不含贬义 / 嘲讽 / 粗俗语句 | 本次修复 | 名言库不含贬义 / 嘲讽 / 粗俗语句 |
 | REG-37 | 节日底色整体偏暖、明度充足，不用冷色与阴暗色（清明节保留清冷竹青） | 本次修复 | 见下方单元用例 |
+| REG-46 | data.json 损坏时不能静默清空：原文件改名保留为 `data.json.corrupt-*`；重启时检测到该备份仍报错，不当作全新安装；本次不写盘，前端显示告警并停止保存 | 本次修复 | Rust `ai::inbox::tests`（drain 二次调用 / 重启读取 / save 守卫）；`regression.ps1` 端到端用例；前端 `loadFailed` 分支 |
+| REG-47 | 回归脚本不能用测试数据覆盖用户数据：残留备份（含另一套脚本的 `.itest`）、空文件、损坏 JSON 一律中止；只恢复本次创建的备份 | 本次修复 | `tests/test-regress-lib.ps1`（6 条） |
+| REG-48 | 测试不能假绿：`skip` 单独统计不计 PASS；集成用例数少于 44 判失败；REG-27 右侧断言失败必须冒泡 | 本次修复 | `integration-page.js` 的 `t()` / REG-27；`regression.ps1` / `integration.ps1` 的 `Report-Cases` |
+| REG-49 | 后台重绘（AI 收件箱轮询）不能吞掉行内编辑内容，也不能把列表滚动位置清零 | 本次修复 | 后台重绘保留行内编辑与滚动位置 |
+| REG-50 | 开机启动 Run 值必须带引号（路径含空格也能启动）；reg 使用 System32 绝对路径并有超时 | 本次修复 | Rust `autostart_add_args_quote_exe_path`、`reg_exe_is_absolute_when_system_root_exists`；超时人工核对 |
+| REG-51 | 单实例运行；`data.json` 临时文件名带 PID，双开不共用临时文件 | 本次修复 | 人工：二次启动直接退出；代码审查临时文件名 |
+| REG-52 | 选图 / 导出对话框在阻塞线程执行，不再卡住无边框窗口重绘 | 本次修复 | 人工抽查（原生对话框无法 CDP 驱动） |
+| REG-53 | `fetch_json` 响应体上限 2MB，异常接口不能拖垮进程 | 本次修复 | 代码审查 + 人工构造大响应 |
+| REG-54 | marketplace.json 解析失败时中止且不重写；`--install-mcp --exe x` 不把 flag 当客户端名 | 本次修复 | Rust `corrupt_marketplace_is_not_overwritten`、`take_value_rejects_following_flag` |
+| REG-55 | 节假日失败只冷却 10 分钟且 force 可重试；天气数据超过 3 小时标注「可能过期」；x/y 为 null 时窗口不贴左上角 | 本次修复 | 人工抽查（依赖时间 / 网络状态） |
+| REG-56 | CDP 连接、发送、接收都有超时；unit-*.js 自动发现；Release 先草稿后统一公开 | 本次修复 | `_dev_cdp.ps1`、脚本自动发现；workflow 人工核对 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 
@@ -90,6 +106,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | 网络错误分类 | Rust 网络错误统一加 `NET_ERR` 前缀；HTTP 4xx 不标记为断网、5xx/429 可重试 | 本次修复 | `src-tauri/src/main.rs` mod tests |
 | 天气适配 | 和风 / 彩云 / uapis 链接识别与字段归一 | 4b376d1 | `unit-weather.js` |
 | 名言数据 | 1313 条、无重复、长度与出处完整 | ab2aae8 | `regression.ps1` QUOTES 校验 |
+| 备份守卫 | 残留备份（含跨脚本 `.itest`）中止、空 / 损坏 JSON 不备份、只恢复本次备份 | 本次修复 | `test-regress-lib.ps1` |
 
 ## 无法完全自动化的部分（人工抽查）
 

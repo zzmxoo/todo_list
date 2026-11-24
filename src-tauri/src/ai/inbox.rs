@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
@@ -89,6 +90,109 @@ fn quarantine(path: &Path) {
     let _ = fs::rename(path, bad);
 }
 
+/// 把损坏的 data.json 改名保留，返回保留后的路径。
+/// 改名失败时返回原路径，绝不删除原文件。
+fn quarantine_data_file(path: &Path) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or_default();
+    let mut dst = path.with_file_name(format!("data.json.corrupt-{stamp}"));
+    let mut seq = 1;
+    while dst.exists() {
+        dst = path.with_file_name(format!("data.json.corrupt-{stamp}-{seq}"));
+        seq += 1;
+    }
+    if fs::rename(path, &dst).is_err() {
+        return path.to_path_buf();
+    }
+    dst
+}
+
+fn corrupt_error(path: &Path, detail: String) -> String {
+    let saved = quarantine_data_file(path);
+    if saved == path {
+        format!("data.json 已损坏（{detail}），且无法备份原文件，已停止写入")
+    } else {
+        format!(
+            "data.json 已损坏（{detail}），原文件已保留为 {}，本次不写入",
+            saved.display()
+        )
+    }
+}
+
+/// 同目录下是否存在损坏备份。`data.json` 被隔离后路径不存在，
+/// 但这不等于首次安装：只要还有 `.corrupt-*`，就必须继续报错。
+fn find_corrupt_backup(path: &Path) -> Option<PathBuf> {
+    let dir = path.parent()?;
+    let prefix = format!(
+        "{}.corrupt-",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("data.json")
+    );
+    let mut found: Vec<PathBuf> = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|item| item.path()))
+        .filter(|item| {
+            item.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with(&prefix))
+                .unwrap_or(false)
+        })
+        .collect();
+    found.sort();
+    found.pop()
+}
+
+fn missing_state_error(path: &Path, saved: &Path) -> String {
+    format!(
+        "{} 不存在，但发现损坏备份 {}；请先恢复该文件后再启动",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("data.json"),
+        saved.display()
+    )
+}
+
+/// 读取 data.json 根对象：文件不存在且没有损坏备份时返回空对象；
+/// 解析失败或根节点不是对象时，先把原文件改名保留再返回错误。
+/// 损坏文件绝不能当成空对象继续参与写盘，否则唯一的数据副本会被覆盖。
+pub fn read_state_root(path: &Path) -> Result<Value, String> {
+    if !path.exists() {
+        if let Some(saved) = find_corrupt_backup(path) {
+            return Err(missing_state_error(path, &saved));
+        }
+        return Ok(json!({}));
+    }
+    let text = fs::read_to_string(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
+    let root = match serde_json::from_str::<Value>(&text) {
+        Ok(value) => value,
+        Err(err) => return Err(corrupt_error(path, err.to_string())),
+    };
+    if !root.is_object() {
+        return Err(corrupt_error(path, "根节点不是对象".into()));
+    }
+    Ok(root)
+}
+
+/// 写入前的最后一道保护：现有 data.json 必须可解析，否则拒绝覆盖。
+/// `data.json` 缺失但存在损坏备份时同样拒绝，避免写出「全新安装」的空壳。
+pub fn ensure_overwritable(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        if let Some(saved) = find_corrupt_backup(path) {
+            return Err(missing_state_error(path, &saved));
+        }
+        return Ok(());
+    }
+    let text = fs::read_to_string(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
+    match serde_json::from_str::<Value>(&text) {
+        Ok(value) if value.is_object() => Ok(()),
+        Ok(_) => Err(corrupt_error(path, "根节点不是对象".into())),
+        Err(err) => Err(corrupt_error(path, err.to_string())),
+    }
+}
+
 /// 读取 ai-inbox 中所有合法条目，合并进 data.json（按 id 去重），
 /// 写盘成功后再删除收件箱文件。返回本次真正新增的待办。
 pub fn drain(dir: &Path) -> Result<Vec<AiTodo>, String> {
@@ -114,15 +218,8 @@ pub fn drain(dir: &Path) -> Result<Vec<AiTodo>, String> {
 
     let _guard = lock_state();
     let data_path = dir.join("data.json");
-    let mut root = if data_path.exists() {
-        let text = fs::read_to_string(&data_path).map_err(|e| e.to_string())?;
-        serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({}))
-    } else {
-        json!({})
-    };
-    if !root.is_object() {
-        root = json!({});
-    }
+    // 损坏时返回错误并保留原文件；收件箱条目不删除，修复后可重试。
+    let mut root = read_state_root(&data_path)?;
 
     let mut added = Vec::new();
     {
@@ -201,6 +298,81 @@ mod tests {
         assert_eq!(read_todos(&dir).len(), 1);
         assert!(dir.join("ai-inbox").join("broken.bad").exists());
         assert!(drain(&dir).unwrap().is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn drain_keeps_corrupt_data_json_and_refuses_to_overwrite() {
+        let dir = test_dir("corrupt");
+        let data_path = dir.join("data.json");
+        let original = "{\"todos\": [ broken";
+        fs::write(&data_path, original).unwrap();
+        enqueue(&dir, &todo("ai-4", "不能覆盖")).unwrap();
+
+        let err = drain(&dir).unwrap_err();
+        assert!(err.contains("损坏"), "unexpected error: {err}");
+
+        let saved: Vec<PathBuf> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|item| item.path()))
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with("data.json.corrupt-"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(saved.len(), 1, "corrupt data.json should be kept");
+        assert_eq!(fs::read_to_string(&saved[0]).unwrap(), original);
+        assert!(!data_path.exists(), "corrupt data.json must not stay in place");
+        assert!(
+            dir.join("ai-inbox").join("ai-4.json").exists(),
+            "inbox item should stay for the next retry"
+        );
+
+        // 第二次 tick：data.json 已被隔离，但存在 .corrupt-* 时仍必须报错，
+        // 不能走「首次安装」分支写出只含 AI 条目的空壳数据。
+        let second = drain(&dir).unwrap_err();
+        assert!(second.contains("损坏备份"), "unexpected error: {second}");
+        assert!(!data_path.exists(), "second drain must not create data.json");
+        assert!(dir.join("ai-inbox").join("ai-4.json").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn missing_state_with_corrupt_backup_is_not_a_fresh_install() {
+        let dir = test_dir("restart");
+        let data_path = dir.join("data.json");
+        fs::write(&data_path, "{bad").unwrap();
+
+        let first = read_state_root(&data_path).unwrap_err();
+        assert!(first.contains("损坏"), "unexpected error: {first}");
+
+        // 模拟重启：data.json 不存在，但同目录有 .corrupt-*。
+        let err = read_state_root(&data_path).unwrap_err();
+        assert!(err.contains("损坏备份"), "unexpected error: {err}");
+        assert!(err.contains("data.json.corrupt-"), "unexpected error: {err}");
+        assert!(ensure_overwritable(&data_path).is_err());
+
+        // 用户恢复出合法的 data.json 后应立即恢复可读写，旧的 .corrupt 不影响启动。
+        fs::write(&data_path, "{\"todos\":[]}").unwrap();
+        assert!(read_state_root(&data_path).is_ok());
+        assert!(ensure_overwritable(&data_path).is_ok());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn save_guard_rejects_corrupt_file_and_allows_valid_one() {
+        let dir = test_dir("save-guard");
+        let data_path = dir.join("data.json");
+        fs::write(&data_path, "not json").unwrap();
+
+        let err = ensure_overwritable(&data_path).unwrap_err();
+        assert!(err.contains("损坏"), "unexpected error: {err}");
+        assert!(!data_path.exists());
+
+        fs::write(&data_path, "{\"todos\":[]}").unwrap();
+        assert!(ensure_overwritable(&data_path).is_ok());
         let _ = fs::remove_dir_all(dir);
     }
 

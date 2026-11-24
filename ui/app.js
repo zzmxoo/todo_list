@@ -92,6 +92,7 @@
     layoutBands,
     badgePlacements,
     buildExportText,
+    normalizeTodos,
   } = window.TodoCore;
 
   // 节气弹框背景：深色渐变 + 节气名水印，按季节配一组颜色
@@ -241,6 +242,9 @@
   let infoPinned = false;
   let lastQuoteIndex = -1;
   let networkOk = null;
+  // data.json 读取失败后停止任何写盘：坏文件已被后端改名保留，
+  // 此时再保存会生成一份只有默认值的新文件，让用户误以为数据被清空。
+  let loadFailed = false;
   let calPress = null;
   let monthCursor = null;
   let weatherBusy = false;
@@ -249,7 +253,8 @@
   const WEATHER_RETRY_MS = 30 * 1000;
   const WEATHER_RETRY_MAX_MS = 10 * 60 * 1000;
   const holidayBusy = new Set();
-  const holidayFailed = new Set();
+  const holidayFailed = new Map();
+  const HOLIDAY_RETRY_MS = 10 * 60 * 1000;
   let quoteSeed = [];
   let layoutChain = Promise.resolve();
   let saveTimer = null;
@@ -440,6 +445,7 @@
     els.calToday = document.getElementById("calToday");
     els.bgImage = document.getElementById("bgImage");
     els.edgePeek = document.getElementById("edgePeek");
+    els.loadError = document.getElementById("loadError");
     els.settingsOverlay = document.getElementById("settingsOverlay");
     els.settingsPanel = document.getElementById("settingsPanel");
     els.settingsClose = document.getElementById("settingsClose");
@@ -525,8 +531,37 @@
     }
   }
 
+  function showLoadError(err) {
+    if (!els.loadError) return;
+    const detail = typeof err === "string" ? err : (err && err.message) || String(err || "");
+    const corrupt = /损坏|corrupt/i.test(detail);
+    els.loadError.textContent = corrupt
+      ? "数据文件已损坏，已停止写入以免覆盖原文件。请先处理 data.json.corrupt-* 备份并重启程序；若正在运行回归测试，同时检查 data.json.regress / data.json.itest。"
+      : "数据文件读取失败，已停止写入以免覆盖原文件。请检查文件权限或磁盘后重启程序。";
+    if (detail) els.loadError.textContent += "（" + detail + "）";
+    els.loadError.hidden = false;
+    if (els.addRow) els.addRow.classList.add("disabled");
+  }
+
   async function boot() {
     cacheEls();
+    try {
+      await bootMain();
+    } catch (err) {
+      // 启动阶段任何异常都不能让窗口停在 opacity:0：用户会看到一个点不到、
+      // 也关不掉的隐形窗口。这里兜底显示错误并保持只读。
+      console.error("boot failed", err);
+      loadFailed = true;
+      const detail = typeof err === "string" ? err : (err && err.message) || String(err || "");
+      if (els.loadError) {
+        els.loadError.textContent = "启动失败，已停止写入以保护数据：" + detail;
+        els.loadError.hidden = false;
+      }
+      if (els.app) els.app.classList.add("ready");
+    }
+  }
+
+  async function bootMain() {
     loadQuoteSeed();
     try {
       const loaded = await invoke("load_state");
@@ -539,6 +574,8 @@
       }
     } catch (err) {
       console.warn("load_state failed", err);
+      loadFailed = true;
+      showLoadError(err);
     }
     normalizeState();
     wireEvents();
@@ -617,18 +654,7 @@
     }
     // 日历模式与极简模式互斥，日历模式优先
     if (state.settings.calendar) state.settings.minimal = false;
-    state.todos = (Array.isArray(state.todos) ? state.todos : [])
-      .filter((todo) => todo && typeof todo.text === "string")
-      .map((todo) => ({
-        id: todo.id || crypto.randomUUID(),
-        text: todo.text,
-        done: !!todo.done,
-        done_at: todo.done_at || null,
-        pinned: !!todo.pinned,
-        due: todo.due || null,
-        start: todo.start || null,
-        created: todo.created || new Date().toISOString(),
-      }));
+    state.todos = normalizeTodos(state.todos);
   }
 
   /* ------------------------------------------------------ persistence */
@@ -639,6 +665,7 @@
   const SAVE_RETRY_MAX_MS = 2 * 60 * 1000;
 
   function save() {
+    if (loadFailed) return; // 数据文件损坏时保持只读，避免覆盖待恢复的原文件
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       // 上一次写盘还没结束：重新排队，绝不能直接丢弃（那会丢掉这期间的用户改动）
@@ -1240,8 +1267,9 @@
   async function restorePosition() {
     const rect = await getWindowRect();
     const avail = screenBounds();
-    const storedX = Number(state.settings.x);
-    const storedY = Number(state.settings.y);
+    // Number(null) === 0，会把全新安装的窗口贴到屏幕左上角；先区分 null。
+    const storedX = state.settings.x == null ? NaN : Number(state.settings.x);
+    const storedY = state.settings.y == null ? NaN : Number(state.settings.y);
     let x = Number.isFinite(storedX) ? storedX : avail.left + 40;
     let y = Number.isFinite(storedY) ? storedY : avail.top + 40;
     x = clamp(x, avail.left, Math.max(avail.left, avail.right - rect.w));
@@ -1394,6 +1422,14 @@
       els.addRow.innerHTML = DEFAULT_BODY();
     }
 
+    // 行内改名期间不做整体重建：重建会移除焦点中的 input，触发 blur 提交并
+    // 递归重绘，既可能吞掉文字，也会把列表滚动位置清零（REG-49）。
+    // 等编辑结束（回车 / Esc / 失焦）后再一次性重绘。
+    if (els.todoList.querySelector(".edit-input")) {
+      renderCalendar();
+      return;
+    }
+
     // 已完成的事项不再显示在待办清单里（仍保留在数据与导出中）
     const list = sortTodos(state.todos).filter((todo) => !todo.done);
     els.todoList.innerHTML = "";
@@ -1415,6 +1451,9 @@
     els.count.textContent = list.length ? `${remaining} 项` : "";
     renderCalendar();
   }
+
+  // 测试钩子：集成用例需要在不抢焦点的情况下触发一次后台重绘（REG-49）。
+  window.__TEST_RENDER_TODOS = renderTodos;
 
   function buildRow(todo) {
     const row = document.createElement("div");
@@ -1486,6 +1525,7 @@
   }
 
   function addTodo(text, options = {}) {
+    if (loadFailed) return null;
     const todo = createTodo({
       id: crypto.randomUUID(),
       text,
@@ -1511,6 +1551,7 @@
   // 外部 MCP / CLI 把待办写入 ai-inbox；桌面端每秒合并一次。
   // 同一 id 只加一次；失败时指数退避，避免磁盘异常时每秒刷 IPC。
   async function pullAiTodos() {
+    if (loadFailed) return; // 损坏数据待恢复时，收件箱也不能写盘
     if (aiPullBusy || Date.now() < aiNextAttempt) return;
     aiPullBusy = true;
     try {
@@ -1554,11 +1595,13 @@
   }
 
   function deleteTodo(id) {
+    if (loadFailed) return;
     state.todos = state.todos.filter((todo) => todo.id !== id);
     commitTodos();
   }
 
   function toggleDone(id) {
+    if (loadFailed) return;
     const index = state.todos.findIndex((todo) => todo.id === id);
     if (index < 0 || state.todos[index].done) return;
     state.todos[index] = applyDone(state.todos[index], true);
@@ -1566,6 +1609,7 @@
   }
 
   function togglePin(id) {
+    if (loadFailed) return;
     const todo = findTodo(id);
     if (!todo) return;
     todo.pinned = !todo.pinned;
@@ -1574,6 +1618,7 @@
 
   /* ------------------------------------------------------ inline edit */
   function startEdit(row, todo) {
+    if (loadFailed) return;
     if (row.querySelector(".edit-input")) return;
     const text = row.querySelector(".text");
     if (!text) return;
@@ -1595,6 +1640,11 @@
       const value = input.value.trim();
       const changed = commit && value && value !== todo.text;
       if (changed) todo.text = value;
+      // 先把 input 换回文本节点再触发重绘：renderTodos 看到 .edit-input 会跳过重建。
+      const span = document.createElement("span");
+      span.className = "text";
+      span.textContent = changed ? value : todo.text;
+      if (input.parentNode) input.replaceWith(span);
       if (changed) {
         commitTodos();
       } else {
@@ -1616,7 +1666,7 @@
   }
 
   function startAdd() {
-    if (addEditing) return;
+    if (addEditing || loadFailed) return;
     addEditing = true;
     els.addRow.classList.add("editing");
     els.addRow.innerHTML =
@@ -1701,6 +1751,7 @@
   }
 
   function commitDue() {
+    if (loadFailed) return;
     if (!dueTodoId) return;
     const todo = findTodo(dueTodoId);
     if (!todo) {
@@ -1718,6 +1769,7 @@
   }
 
   function clearDue() {
+    if (loadFailed) return;
     if (!dueTodoId) return;
     const todo = findTodo(dueTodoId);
     if (todo) {
@@ -1775,6 +1827,7 @@
   }
 
   function openCalAdd(cell) {
+    if (loadFailed) return;
     const key = cell.dataset.date;
     if (!key) return;
     hideCalInfo();
@@ -1965,10 +2018,12 @@
     }
     const current = data.current || {};
     const info = wmoInfo(current.code);
+    const stale =
+      Number(data.ts) > 0 && Date.now() / 1000 - Number(data.ts) > 3 * 60 * 60;
     els.wcCity.textContent = data.city || state.settings.city || "定位中…";
     els.wcIcon.innerHTML = wxIcon(info.kind, 42);
     els.wcTemp.textContent = `${current.temp ?? "--"}°`;
-    els.wcCond.textContent = info.text;
+    els.wcCond.textContent = stale ? `${info.text} · 数据可能过期` : info.text;
     els.wcExtra.textContent = `湿度 ${current.humidity ?? "--"}%  ·  风速 ${current.wind ?? "--"} km/h`;
 
     const today = data.daily && data.daily[0];
@@ -2293,7 +2348,10 @@
 
   function ensureHolidays(year, force) {
     if (!force && holidayConfig(year)) return;
-    if (holidayBusy.has(year) || holidayFailed.has(year)) return;
+    if (holidayBusy.has(year)) return;
+    // 失败只冷却 10 分钟；force（跨年刷新）必须能绕过缓存。
+    const failedAt = holidayFailed.get(year);
+    if (!force && failedAt && Date.now() - failedAt < HOLIDAY_RETRY_MS) return;
     if (navigator.onLine === false) return;
     holidayBusy.add(year);
     (async () => {
@@ -2316,7 +2374,7 @@
         save();
         renderCalendar();
       } catch (err) {
-        holidayFailed.add(year);
+        holidayFailed.set(year, Date.now());
         console.warn("holiday fetch failed", year, err);
       } finally {
         holidayBusy.delete(year);
@@ -3256,10 +3314,12 @@
 
     els.quitBtn.addEventListener("click", async () => {
       try {
-        await invoke("save_state", { state: serializeState() });
+        if (!loadFailed) await invoke("save_state", { state: serializeState() });
         if (win) await win.close();
       } catch (err) {
         console.warn(err);
+        // 写盘失败也必须能退出，不能把用户困在程序里。
+        if (win) await win.close();
       }
     });
   }
@@ -3375,6 +3435,7 @@
     });
 
     window.addEventListener("beforeunload", () => {
+      if (loadFailed) return;
       try {
         invoke("save_state", { state: serializeState() });
       } catch (err) {

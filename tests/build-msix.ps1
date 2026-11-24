@@ -145,9 +145,10 @@ Write-Host "built: $msix"
 
 # 签名（可选）
 if ($Pfxn) {
-  $args = @('sign', '/fd', 'SHA256', '/f', $Pfxn, '/p', $Password, $msix)
+  # 注意：签名口令会出现在命令行参数里，不要在共享机器上使用本地签名。
+  $signArgs = @('sign', '/fd', 'SHA256', '/f', $Pfxn, '/p', $Password, $msix)
   if (-not (Test-Path $signtool)) { throw 'signtool.exe not found' }
-  & $signtool @args 2>&1 | ForEach-Object { Write-Host $_ }
+  & $signtool @signArgs 2>&1 | ForEach-Object { Write-Host $_ }
   if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)" }
   Write-Host 'signed'
 } else {

@@ -126,6 +126,32 @@
     return Math.min(1, Math.max(0, 1 - Math.pow(Math.min(1, Math.max(0, a)), OPACITY_GAMMA)));
   }
 
+  function newTodoId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return `todo-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  // 启动时统一待办形状。必须保留 source / provider：AI 来源标签依赖它们，
+  // 每次启动都重建对象，漏字段会在下一次保存时永久写丢。
+  function normalizeTodos(input) {
+    return (Array.isArray(input) ? input : [])
+      .filter((todo) => todo && typeof todo.text === "string")
+      .map((todo) => ({
+        id: todo.id || newTodoId(),
+        text: todo.text,
+        done: !!todo.done,
+        done_at: todo.done_at || null,
+        pinned: !!todo.pinned,
+        due: todo.due || null,
+        start: todo.start || null,
+        created: todo.created || new Date().toISOString(),
+        source: todo.source || null,
+        provider: todo.provider || null,
+      }));
+  }
+
   return {
     SOLAR_TERMS,
     pad2,
@@ -139,5 +165,6 @@
     buildExportText,
     opacityFromTransparency,
     transparencyFromOpacity,
+    normalizeTodos,
   };
 });

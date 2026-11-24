@@ -25,17 +25,15 @@ fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let _guard = ai::inbox::lock_state();
     let path = data_dir(&app)?.join("data.json");
-    if !path.exists() {
-        return Ok(serde_json::Value::Null);
-    }
-    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| e.to_string())
+    // 损坏文件会被改名保留并返回错误，前端据此停止写盘，避免覆盖唯一副本。
+    ai::inbox::read_state_root(&path)
 }
 
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
     let _guard = ai::inbox::lock_state();
     let path = data_dir(&app)?.join("data.json");
+    ai::inbox::ensure_overwritable(&path)?;
     ai::write_json_atomic(&path, &state)
 }
 
@@ -54,12 +52,17 @@ fn drain_ai_todos(app: tauri::AppHandle) -> Result<Vec<ai::providers::AiTodo>, S
 }
 
 /// 选择背景图片并复制到应用数据目录，返回复制后的绝对路径。
+/// 原生对话框是阻塞调用，放到阻塞线程，避免无边框窗口停止重绘。
 #[tauri::command]
-fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let picked = rfd::FileDialog::new()
-        .set_title("选择背景图片")
-        .add_filter("图片", &["png", "jpg", "jpeg", "bmp", "webp", "gif"])
-        .pick_file();
+async fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("选择背景图片")
+            .add_filter("图片", &["png", "jpg", "jpeg", "bmp", "webp", "gif"])
+            .pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     let Some(src) = picked else {
         return Ok(None);
@@ -82,12 +85,16 @@ fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
 
 /// 弹出保存对话框，把文本写入用户选择的文件；取消时返回 None。
 #[tauri::command]
-fn export_text(default_name: String, content: String) -> Result<Option<String>, String> {
-    let picked = rfd::FileDialog::new()
-        .set_title("导出近期待办")
-        .set_file_name(&default_name)
-        .add_filter("文本文件", &["txt"])
-        .save_file();
+async fn export_text(default_name: String, content: String) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            .set_title("导出近期待办")
+            .set_file_name(&default_name)
+            .add_filter("文本文件", &["txt"])
+            .save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     let Some(path) = picked else {
         return Ok(None);
@@ -152,9 +159,23 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
         let prefix = if retryable { NET_ERR } else { "" };
         return Err(format!("{prefix}请求失败：HTTP {code}"));
     }
-    res.json::<serde_json::Value>()
+    // 这是渲染进程唯一的外网通道，限制响应体大小，避免异常接口拖垮进程。
+    const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+    if res
+        .content_length()
+        .map(|len| len as usize > MAX_BODY_BYTES)
+        .unwrap_or(false)
+    {
+        return Err("响应体过大（超过 2MB）".into());
+    }
+    let bytes = res
+        .bytes()
         .await
-        .map_err(|e| format!("数据解析失败：{e}"))
+        .map_err(|e| classify_request_error(&e))?;
+    if bytes.len() > MAX_BODY_BYTES {
+        return Err("响应体过大（超过 2MB）".into());
+    }
+    serde_json::from_slice(&bytes).map_err(|e| format!("数据解析失败：{e}"))
 }
 
 const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
@@ -170,28 +191,36 @@ fn lerp(start: f64, end: f64, t: f64) -> f64 {
 }
 
 /// 开机启动写入命令的参数单独构造，便于单元测试。
+/// Run 值必须带引号：路径含空格时，未加引号的命令行会被拆成多个参数。
 fn autostart_add_args(exe: &str) -> Vec<String> {
-    [
-        "add",
-        AUTOSTART_KEY,
-        "/v",
-        AUTOSTART_NAME,
-        "/t",
-        "REG_SZ",
-        "/d",
-        exe,
-        "/f",
+    vec![
+        "add".into(),
+        AUTOSTART_KEY.into(),
+        "/v".into(),
+        AUTOSTART_NAME.into(),
+        "/t".into(),
+        "REG_SZ".into(),
+        "/d".into(),
+        format!("\"{exe}\""),
+        "/f".into(),
     ]
-    .iter()
-    .map(|value| value.to_string())
-    .collect()
 }
 
 fn autostart_delete_args() -> Vec<String> {
-    ["delete", AUTOSTART_KEY, "/v", AUTOSTART_NAME, "/f"]
-        .iter()
-        .map(|value| value.to_string())
-        .collect()
+    vec![
+        "delete".into(),
+        AUTOSTART_KEY.into(),
+        "/v".into(),
+        AUTOSTART_NAME.into(),
+        "/f".into(),
+    ]
+}
+
+/// 固定使用系统目录下的 reg.exe，避免 PATH / 工作目录被替换。
+fn reg_exe() -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(|root| PathBuf::from(root).join("System32").join("reg.exe"))
+        .unwrap_or_else(|| PathBuf::from("reg"))
 }
 
 static WINDOW_ANIM_GEN: AtomicU64 = AtomicU64::new(0);
@@ -251,11 +280,16 @@ async fn get_autostart() -> Result<bool, String> {
         if has_package_identity() {
             return Ok(false);
         }
-        let output = tokio::process::Command::new("reg")
-            .args(["query", AUTOSTART_KEY, "/v", AUTOSTART_NAME])
-            .output()
-            .await
-            .map_err(|e| e.to_string())?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::process::Command::new(reg_exe())
+                .args(["query", AUTOSTART_KEY, "/v", AUTOSTART_NAME])
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .map_err(|_| "查询开机启动超时".to_string())?
+        .map_err(|e| e.to_string())?;
         return Ok(output.status.success());
     }
     #[cfg(not(windows))]
@@ -292,20 +326,29 @@ async fn set_autostart(enabled: bool) -> Result<bool, String> {
         if enabled {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let value = exe.to_string_lossy().to_string();
-            let status = tokio::process::Command::new("reg")
-                .args(autostart_add_args(&value))
-                .status()
-                .await
-                .map_err(|e| e.to_string())?;
+            let status = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio::process::Command::new(reg_exe())
+                    .args(autostart_add_args(&value))
+                    .kill_on_drop(true)
+                    .status(),
+            )
+            .await
+            .map_err(|_| "写入开机启动超时".to_string())?
+            .map_err(|e| e.to_string())?;
             if !status.success() {
                 return Err("写入开机启动项失败".into());
             }
         } else {
             // 不存在时 reg delete 会返回非 0，这里视为已关闭
-            let _ = tokio::process::Command::new("reg")
-                .args(autostart_delete_args())
-                .status()
-                .await;
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio::process::Command::new(reg_exe())
+                    .args(autostart_delete_args())
+                    .kill_on_drop(true)
+                    .status(),
+            )
+            .await;
         }
         return Ok(enabled);
     }
@@ -378,6 +421,27 @@ fn set_taskbar_hidden(
     Ok(())
 }
 
+/// 命名互斥量做单实例保护：双开会用同一份 data.json 交替全量写盘。
+/// 拿不到锁时不要阻止启动（例如权限异常），只是放弃单实例保护。
+#[cfg(windows)]
+fn already_running() -> bool {
+    use std::ffi::c_void;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateMutexW(attributes: *mut c_void, initial_owner: i32, name: *const u16) -> *mut c_void;
+        fn GetLastError() -> u32;
+    }
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+    let name: Vec<u16> = "Local\\DesktopTodoWidgetSingleInstance\0"
+        .encode_utf16()
+        .collect();
+    let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, name.as_ptr()) };
+    if handle.is_null() {
+        return false;
+    }
+    unsafe { GetLastError() == ERROR_ALREADY_EXISTS }
+}
+
 fn main() {
     // MCP / CLI 模式不启动窗口：AI 工具通过 stdio 或命令行写入待办。
     let args: Vec<String> = std::env::args().collect();
@@ -389,6 +453,12 @@ fn main() {
     }
     if let Some(code) = ai::cli::run(&args) {
         std::process::exit(code);
+    }
+
+    // 单实例：第二个进程直接退出，避免两个实例交替覆盖 data.json。
+    #[cfg(windows)]
+    if already_running() {
+        return;
     }
 
     // 提高系统定时器精度到 1ms，保证 Rust 侧窗口动画的逐帧间隔均匀
@@ -448,14 +518,26 @@ mod tests {
     }
 
     #[test]
-    fn autostart_add_args_target_same_registry_value() {
-        let exe = r"C:\Apps\desktop-todo.exe";
+    fn autostart_add_args_quote_exe_path() {
+        let exe = r"C:\Program Files\Todo\desktop-todo.exe";
         let args = autostart_add_args(exe);
         assert_eq!(args[0], "add");
         assert!(args.contains(&AUTOSTART_KEY.to_string()));
         assert!(args.contains(&AUTOSTART_NAME.to_string()));
-        assert!(args.contains(&exe.to_string()));
+        assert!(
+            args.contains(&format!("\"{exe}\"")),
+            "Run value must be quoted: {args:?}"
+        );
         assert_eq!(args.last().map(String::as_str), Some("/f"));
+    }
+
+    #[test]
+    fn reg_exe_is_absolute_when_system_root_exists() {
+        if std::env::var_os("SystemRoot").is_some() {
+            let path = reg_exe();
+            assert!(path.is_absolute(), "reg path: {}", path.display());
+            assert!(path.ends_with("System32/reg.exe") || path.ends_with("System32\\reg.exe"));
+        }
     }
 
     #[test]

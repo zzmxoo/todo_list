@@ -87,8 +87,13 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 /// 原子写 JSON：临时文件 + rename，避免桌面端/外部进程读到半截文件。
+/// 临时文件名带 PID：双开时两个进程不会共用同一个临时文件。
 pub fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), String> {
-    let tmp = path.with_extension("json.tmp");
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("data.json");
+    let tmp = path.with_file_name(format!("{name}.{}.tmp", std::process::id()));
     let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
     if fs::rename(&tmp, path).is_err() {

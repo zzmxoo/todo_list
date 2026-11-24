@@ -10,13 +10,16 @@ function Eval-Expr([string]$expr) {
 }
 
 $failed = 0
-foreach ($file in @('unit-core.js', 'unit-weather.js', 'unit-todo.js', 'unit-calendar.js', 'unit-domain.js')) {
-  $expr = Get-Content (Join-Path $PSScriptRoot $file) -Raw -Encoding UTF8
+$unitFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'unit-*.js' | Sort-Object Name)
+foreach ($file in $unitFiles) {
+  $expr = Get-Content $file.FullName -Raw -Encoding UTF8
   $result = Eval-Expr $expr | ConvertFrom-Json
   foreach ($case in $result.results) {
-    if ($case.ok) { "PASS  $($case.name)" } else { "FAIL  $($case.name): $($case.error)" }
+    if ($case.skipped) { "SKIP  $($case.name)" }
+    elseif ($case.ok) { "PASS  $($case.name)" }
+    else { "FAIL  $($case.name): $($case.error)" }
   }
-  "UNIT[$file] pass=$($result.passed) fail=$($result.failed)"
+  "UNIT[$($file.Name)] pass=$($result.passed) fail=$($result.failed)"
   $failed += [int]$result.failed
 }
 

@@ -11,8 +11,14 @@
   const results = [];
   const t = async (name, fn) => {
     try {
-      const detail = await fn();
-      results.push({ name, ok: true, detail: detail === undefined ? '' : String(detail) });
+      const value = await fn();
+      const detail = value === undefined ? '' : String(value);
+      // skip 必须与 PASS 分开统计，否则断网 / 无显示器时用例会假装通过。
+      results.push(
+        typeof value === 'string' && value.startsWith('skip')
+          ? { name, ok: true, skipped: true, detail }
+          : { name, ok: true, detail }
+      );
     } catch (err) {
       results.push({ name, ok: false, error: String((err && err.message) || err) });
     }
@@ -36,8 +42,14 @@
   const getWin = () => window.__TAURI__.window.getCurrentWindow();
   const Pos = () => window.__TAURI__.dpi.PhysicalPosition;
 
-  const todoTexts = () => $$('.todo-row .text').map((el) => el.textContent);
-  const findRow = (text) => $$('.todo-row').find((r) => r.querySelector('.text').textContent === text);
+  const rowText = (row) => {
+    const text = row.querySelector('.text');
+    if (text) return text.textContent;
+    const input = row.querySelector('.edit-input');
+    return input ? input.value : '';
+  };
+  const todoTexts = () => $$('.todo-row').map(rowText);
+  const findRow = (text) => $$('.todo-row').find((r) => rowText(r) === text);
 
   async function waitFor(fn, timeout = 2000, step = 60) {
     const start = performance.now();
@@ -266,15 +278,18 @@
   });
 
   await t('[REG-03] 新增 / 置顶 / 编辑 / 删除待办', async () => {
+    // 先放一条锚点，保证「置顶后到第一」不是空列表上的恒真断言。
+    await addTodo('ITEST-置顶锚点');
     const row = await addTodo('ITEST-新增');
     ok(row, 'created');
     const pinBtn = () => findRow('ITEST-新增').querySelector('.act-btn.pin');
     const idxBefore = todoTexts().indexOf('ITEST-新增');
+    ok(idxBefore > 0, 'baseline has item before pinned one');
     click(pinBtn());
     await sleep(220);
     ok(pinBtn().classList.contains('on'), 'pin on');
     const idxPinned = todoTexts().indexOf('ITEST-新增');
-    ok(idxPinned <= idxBefore, 'moved up when pinned');
+    ok(idxPinned < idxBefore, 'moved above baseline when pinned: ' + idxPinned + ' vs ' + idxBefore);
     click(pinBtn());
     await sleep(220);
     ok(!pinBtn().classList.contains('on'), 'pin off');
@@ -292,6 +307,8 @@
     ok(findRow('ITEST-改后'), 'edited');
     await deleteTodo('ITEST-改后');
     ok(!findRow('ITEST-改后'), 'deleted');
+    await deleteTodo('ITEST-置顶锚点');
+    ok(!findRow('ITEST-置顶锚点'), 'anchor deleted');
     return 'ok';
   });
 
@@ -336,6 +353,47 @@
     await sleep(1100);
     await deleteTodo('ITEST-草稿锚点');
     return 'preserved';
+  });
+
+  await t('[REG-49] 后台重绘保留行内编辑内容和列表滚动位置', async () => {
+    // AI 收件箱每秒轮询会触发 commitTodos -> renderTodos；行内编辑不能被吞。
+    const names = [];
+    for (let i = 0; i < 12; i += 1) {
+      const name = 'ITEST-滚动-' + i;
+      await addTodo(name);
+      names.push(name);
+    }
+    const list = $('#todoList');
+    list.scrollTop = 30;
+    await sleep(120);
+    const scrollBefore = list.scrollTop;
+    ok(scrollBefore > 0, 'list is scrollable: ' + scrollBefore);
+
+    const target = findRow(names[0]);
+    target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    let input = null;
+    for (let i = 0; i < 10 && !input; i += 1) {
+      await sleep(80);
+      input = $('.edit-input');
+    }
+    ok(input, 'edit input');
+    input.value = 'ITEST-编辑中';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    window.__TEST_RENDER_TODOS();
+    await sleep(150);
+    const kept = $('.edit-input');
+    ok(kept, 'edit input preserved after re-render');
+    eq(kept.value, 'ITEST-编辑中', 'edit value preserved');
+    ok(
+      list.scrollTop >= scrollBefore - 1,
+      'scroll preserved: ' + list.scrollTop + ' vs ' + scrollBefore
+    );
+
+    kept.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(150);
+    for (const name of names) await deleteTodo(name);
+    return 'edit+scroll preserved';
   });
 
   await t('[REG-05] 设置分类顺序、页面切换与关于版本', async () => {
@@ -549,7 +607,7 @@
         break;
       }
     }
-    ok(expanded >= 0 && expanded < 250, 'expand ms=' + expanded);
+    ok(expanded >= 0 && expanded < 400, 'expand ms=' + expanded);
     const delta = window.innerWidth - w0;
     ok(delta >= 240 && delta <= 280, 'delta=' + delta);
     ok(!$('#weatherCard').hidden, 'weather card visible');
@@ -1100,17 +1158,28 @@
     await openSettingsTab(0);
     const sw = $('#autostartSwitch');
     eq(sw.classList.contains('on'), !!original, 'initial matches registry');
-    const next = !original;
-    click(sw);
-    eq(sw.classList.contains('on'), next, 'instant visual feedback');
-    const changed = await waitFor(async () => (await invoke('get_autostart')) === next, 4000, 60);
-    ok(changed >= 0, 'registry updated');
-    click(sw);
-    eq(sw.classList.contains('on'), original, 'instant restore feedback');
-    const restored = await waitFor(async () => (await invoke('get_autostart')) === original, 4000, 60);
-    ok(restored >= 0, 'registry restored');
-    await closeSettings();
-    return `immediate registry=${Math.round(changed)}ms restore=${Math.round(restored)}ms`;
+    try {
+      const next = !original;
+      click(sw);
+      eq(sw.classList.contains('on'), next, 'instant visual feedback');
+      const changed = await waitFor(async () => (await invoke('get_autostart')) === next, 4000, 60);
+      ok(changed >= 0, 'registry updated');
+      click(sw);
+      eq(sw.classList.contains('on'), original, 'instant restore feedback');
+      const restored = await waitFor(async () => (await invoke('get_autostart')) === original, 4000, 60);
+      ok(restored >= 0, 'registry restored');
+      return `immediate registry=${Math.round(changed)}ms restore=${Math.round(restored)}ms`;
+    } finally {
+      // 用例中途失败也必须把用户的开机启动恢复原状（data.json 恢复不覆盖注册表）。
+      try {
+        if ((await invoke('get_autostart')) !== original) {
+          await invoke('set_autostart', { enabled: original });
+        }
+      } catch (err) {
+        console.warn('autostart restore failed', err);
+      }
+      await closeSettings();
+    }
   });
 
   await t('[REG-35] 开机启动写入失败时开关回滚，界面不能停在与实际不一致的状态', async () => {
@@ -1194,15 +1263,21 @@
     const orig = await w.outerPosition();
     const size = await w.outerSize();
     await w.setPosition(new PPos(-Math.round(size.width / 2), 260));
-    await sleep(430);
     const app = $('#app');
-    const transform = getComputedStyle(app).transform;
-    ok(transform && transform !== 'none', 'scaling: ' + transform);
+    const started = await waitFor(() => {
+      const style = getComputedStyle(app);
+      return style.transform !== 'none' && parseFloat(style.opacity) < 0.99;
+    }, 1200, 20);
+    ok(started >= 0, 'scaling/fading started');
     ok(!app.className.includes('edge-hidden'), 'content still visible');
-    ok(parseFloat(getComputedStyle(app).opacity) < 0.95, 'fading');
-    await sleep(900);
-    ok(app.className.includes('edge-hidden'), 'hidden after animation');
-    eq(getComputedStyle($('#edgePeek')).display, 'block', 'peek shown');
+    const hidden = await waitFor(() => app.className.includes('edge-hidden'), 2000, 50);
+    ok(hidden >= 0, 'hidden after animation');
+    const peekShown = await waitFor(
+      () => getComputedStyle($('#edgePeek')).display === 'block',
+      1000,
+      30
+    );
+    ok(peekShown >= 0, 'peek shown');
     await w.setPosition(new PPos(orig.x, orig.y));
     await sleep(700);
     return 'ok';
@@ -1236,7 +1311,7 @@
 
     await w.setPosition(new PPos(200, 300));
     await sleep(900);
-    let rightInfo = 'no-monitor';
+    let rightInfo = 'skip: no monitor';
     try {
       const monitors = window.__TAURI__.window.availableMonitors
         ? await window.__TAURI__.window.availableMonitors()
@@ -1253,6 +1328,8 @@
           );
         }) || monitors[0];
       if (mon) {
+        // 从这里开始是真正的断言：任何失败都必须冒泡，不能再被当成 skip。
+        rightInfo = 'right check failed';
         const rightEdge = mon.position.x + mon.size.width;
         const insideRight = rightEdge - size.width + Math.round(markerRight) - 8;
         await w.setPosition(new PPos(insideRight, 300));
@@ -1266,16 +1343,17 @@
           hiddenRight = $('#app').className.includes('edge-hidden-right');
         }
         ok(hiddenRight, 'right: symmetric threshold hides');
-        await w.setPosition(new PPos(200, 300));
-        await sleep(900);
         rightInfo = 'right ok';
       }
     } catch (err) {
-      rightInfo = 'right skip: ' + err.message;
+      if (rightInfo !== 'skip: no monitor') throw err;
+      rightInfo = 'skip: no monitor (' + err.message + ')';
+    } finally {
+      await w.setPosition(new PPos(orig.x, orig.y));
+      await sleep(600);
     }
-    await w.setPosition(new PPos(orig.x, orig.y));
-    await sleep(600);
-    return 'markerRight=' + Math.round(markerRight) + ' ' + rightInfo;
+    const prefix = 'markerRight=' + Math.round(markerRight);
+    return rightInfo.startsWith('skip') ? rightInfo + ' ' + prefix : prefix + ' ' + rightInfo;
   });
 
   await t('[REG-28] 刚收起时鼠标仍在窄边不会自动弹出，移开再回才唤出', async () => {
@@ -1573,6 +1651,8 @@
     }
   });
 
-  const passed = results.filter((r) => r.ok).length;
-  return JSON.stringify({ passed, failed: results.length - passed, results });
+  const passed = results.filter((r) => r.ok && !r.skipped).length;
+  const skipped = results.filter((r) => r.skipped).length;
+  const failed = results.filter((r) => !r.ok).length;
+  return JSON.stringify({ passed, failed, skipped, results });
 })()

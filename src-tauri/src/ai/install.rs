@@ -80,12 +80,14 @@ fn upsert_marketplace(manifest_path: &Path, plugin_dir_name: &str) -> Result<(),
         let backup = manifest_path.with_extension("json.bak-todo");
         let _ = fs::copy(manifest_path, &backup);
         let text = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&text).unwrap_or_else(|_| json!({ "plugins": [] }))
+        // 解析失败时不能当成空表重写：那会抹掉用户已有的其它插件注册。
+        serde_json::from_str(&text)
+            .map_err(|e| format!("marketplace.json 解析失败，已中止且未修改：{e}"))?
     } else {
         json!({ "plugins": [] })
     };
     if !root.is_object() {
-        root = json!({ "plugins": [] });
+        return Err("marketplace.json 根节点不是对象，已中止且未修改".into());
     }
     let object = root.as_object_mut().expect("object");
     let list = object.entry("plugins").or_insert_with(|| json!([]));
@@ -171,7 +173,11 @@ fn take_value(args: &[String], index: usize, flag: &str) -> Option<(String, usiz
     if let Some(value) = arg.strip_prefix(&format!("{flag}=")) {
         return Some((value.to_string(), index + 1));
     }
-    args.get(index + 1).map(|value| (value.clone(), index + 2))
+    // 下一个参数是另一个 flag 时不能把它当值，否则 --install-mcp --exe x
+    // 会把 client 设成 "--exe"，报错指向错误的原因。
+    args.get(index + 1)
+        .filter(|value| !value.starts_with('-'))
+        .map(|value| (value.clone(), index + 2))
 }
 
 /// 返回 Some(exit_code) 表示这是安装命令，不启动 GUI。
@@ -277,6 +283,32 @@ mod tests {
         assert!(mcp.contains("--mcp"));
         assert!(mcp.contains("desktop-todo.exe"));
         let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn corrupt_marketplace_is_not_overwritten() {
+        let dir = test_dir("marketplace-corrupt");
+        let manifest = dir.join("marketplace.json");
+        fs::write(&manifest, "{bad").unwrap();
+        let err = upsert_marketplace(&manifest, "desktop-todo").unwrap_err();
+        assert!(err.contains("解析失败"), "unexpected error: {err}");
+        assert_eq!(fs::read_to_string(&manifest).unwrap(), "{bad");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn take_value_rejects_following_flag() {
+        let args = vec![
+            "--install-mcp".to_string(),
+            "--exe".to_string(),
+            "x".to_string(),
+        ];
+        assert!(take_value(&args, 0, "--install-mcp").is_none());
+        let eq = vec!["--install-mcp=workbuddy".to_string()];
+        assert_eq!(
+            take_value(&eq, 0, "--install-mcp").map(|(value, _)| value),
+            Some("workbuddy".to_string())
+        );
     }
 
     #[test]

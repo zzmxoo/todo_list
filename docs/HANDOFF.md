@@ -156,8 +156,9 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 - 打开“不在任务栏显示”：`set_skip_taskbar(true)`，并把托盘图标显示出来（进入系统托盘溢出区）。
 - 托盘菜单：显示主界面、退出程序；左键单击也显示主界面。
 - 显示时如果窗口处于边缘收起状态，会立即唤出，并在 5 秒后自动缩回；鼠标停在窗口上则每秒顺延。
-- 开机启动写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名 `DesktopTodo`，数据为当前 exe 路径。
+- 开机启动写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名 `DesktopTodo`，数据为带引号的当前 exe 路径（路径含空格也能启动）。
 - 开关交互必须先同步反馈，再异步写注册表；写入失败回滚开关。
+- 程序单实例运行：第二个进程直接退出，避免两个实例交替全量写 `data.json`。
 
 ### 3.8 导出
 
@@ -244,12 +245,13 @@ Tauri 命令：
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-- Rust：33 条（缓动、插值、注册表命令参数、AI provider 归一、时长计算、收件箱、MCP、客户端注册）
-- JS 单元：46 条（core / calendar / todo / domain / weather）
+- Rust：39 条（缓动、插值、注册表命令参数与引号、AI provider 归一、时长计算、收件箱、损坏数据保留与重启检测、MCP、客户端注册）
+- 脚本自测：6 条（备份守卫：残留备份 / 跨脚本备份 / 空 / 损坏数据一律不覆盖）
+- JS 单元：47 条（core / calendar / todo / domain / weather，含待办归一保留 AI 来源）
 - 数据：名言 1313 条、无重复、字段完整
-- UI 集成：44 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入
-- 当前结果：**124 passed / 0 failed**（feature/support_ai 分支）
-- 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序。
+- UI 集成：45 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入、损坏数据保护、编辑态保护
+- 当前结果：**139 passed / 0 failed / 0 skipped**（master 分支）
+- 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序；发现残留备份会中止，避免覆盖用户数据。
 - UI 测试通过 WebView2 CDP（端口 9222）在真实应用里执行；集成脚本超过 32KB，统一用临时文件传给 CDP。
 
 维护规则：
@@ -270,7 +272,7 @@ cargo build --release
 
 - 改前端后也必须重新构建，否则 exe 里仍是旧资源。
 - 版本号同时改：`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`desktop-todo` 包）、`src-tauri/tauri.conf.json`。
-- 发布流程：改版本 → 构建 → 跑 `tests\regression.ps1` → 提交 → 打附注 tag。
+- 发布流程：改版本 → 构建 → 跑 `tests\regression.ps1` → 提交 → 打附注 tag。CI 先生成草稿 Release，等 MSIX 等资产全部上传后再公开；中途失败可直接重跑同一 tag。
 - 当前 tag 命名：`0.0.x`；tag 说明用中文简述本次内容。
 - `bundle.active` 为 `false`，目前没有生成安装包，直接运行 release exe。
 

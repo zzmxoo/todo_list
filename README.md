@@ -71,7 +71,7 @@ cargo build --release  # 发布版：target\release\desktop-todo.exe
 
 前端在 `ui/` 目录（纯 HTML/CSS/JS，无 Node 构建步骤）；Tauri 配置、Rust 命令在 `src-tauri/`。纯函数集中在 `ui/core.js`；待办、日历、节假日、每日一句的领域规则在 `ui/domain/`（todo / calendar / holiday / quote），只处理普通对象、不碰 DOM；天气解析与各数据源适配集中在 `ui/weather.js`（`WeatherAPI`）。待办写操作统一走 `commitTodos()`，负责保存、重绘与布局。
 
-单元测试在 `tests/` 下，借 WebView2 的 JS 引擎运行。完整回归会先跑 Rust 纯函数单测，再备份用户数据、启动发布版、跑 40 条 JS 单元测试与 33 条 UI 集成回归，结束后恢复数据：
+单元测试在 `tests/` 下，借 WebView2 的 JS 引擎运行。完整回归会先跑 Rust 纯函数单测与备份守卫自测，再备份用户数据、启动测试版、跑 47 条 JS 单元测试与 45 条 UI 集成回归，结束后恢复数据：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
