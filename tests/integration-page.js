@@ -1208,18 +1208,37 @@
     return 'ok';
   });
 
-  await t('[REG-27] 移出屏幕不足 1/3 时不收起', async () => {
+  await t('[REG-27] 待办原点/五角星移出屏幕才收起', async () => {
     const w = getWin();
     const PPos = Pos();
     await resetEdge(w);
     const orig = await w.outerPosition();
     const size = await w.outerSize();
-    await w.setPosition(new PPos(-Math.round(size.width * 0.2), 300));
+    const marker = $('.todo-row .status') || $('.todo-row .mark-dot');
+    ok(marker, 'todo marker');
+    const appRect = $('#app').getBoundingClientRect();
+    const ratio = size.width / window.innerWidth;
+    const markerRight = (marker.getBoundingClientRect().right - appRect.left) * ratio;
+
+    // 标记还在屏幕内（只差几像素）时不收起
+    await w.setPosition(new PPos(-Math.max(2, Math.round(markerRight - 8)), 300));
     await sleep(900);
-    ok(!$('#app').className.includes('edge-hidden'), 'must stay visible at 20% off-screen');
+    ok(!$('#app').className.includes('edge-hidden'), 'marker still inside, stay visible');
+
+    // 标记完全移出左侧后才收起
+    await w.setPosition(new PPos(-Math.round(markerRight + 12), 300));
+    let hidden = false;
+    for (let i = 0; i < 15 && !hidden; i += 1) {
+      await sleep(200);
+      hidden = $('#app').className.includes('edge-hidden');
+    }
+    ok(hidden, 'marker outside screen, hide');
+
+    await w.setPosition(new PPos(200, 300));
+    await sleep(900);
     await w.setPosition(new PPos(orig.x, orig.y));
     await sleep(600);
-    return 'ok';
+    return 'markerRight=' + Math.round(markerRight);
   });
 
   await t('[REG-28] 刚收起时鼠标仍在窄边不会自动弹出，移开再回才唤出', async () => {

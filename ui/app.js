@@ -1097,6 +1097,21 @@
     }
   }
 
+  /** 待办行左侧原点/五角星在窗口内的物理偏移，用于判断它是否已移出屏幕。 */
+  function todoMarkerOffsets(size) {
+    const marker =
+      document.querySelector(".todo-row .status") ||
+      document.querySelector(".todo-row .mark-dot");
+    if (!marker || !els.app) return null;
+    const markerRect = marker.getBoundingClientRect();
+    const appRect = els.app.getBoundingClientRect();
+    const ratio = window.innerWidth ? size.width / window.innerWidth : 1;
+    return {
+      left: (markerRect.left - appRect.left) * ratio,
+      right: (markerRect.right - appRect.left) * ratio,
+    };
+  }
+
   async function handleMoveSettled() {
     if (!win || settingsOpen || edgeAnimating) return;
     if (edgeHide) {
@@ -1167,14 +1182,20 @@
     topDwellSince = 0;
     clearTimeout(topDwellTimer);
 
-    // 超过 1/3 移出所有显示器：向最近的侧边 / 底边隐藏
-    if (visibleRatio(pos, size, monitors) < 2 / 3) {
-      const over = {
-        left: r.x - pos.x,
-        right: pos.x + size.width - (r.x + r.w),
-        bottom: pos.y + size.height - (r.y + r.h),
-      };
-      let edge = "";
+    // 侧边：待办左侧的圆点/五角星完全移出屏幕后才收起；
+    // 底边仍按“移出超过 1/3”处理。
+    const over = {
+      left: r.x - pos.x,
+      right: pos.x + size.width - (r.x + r.w),
+      bottom: pos.y + size.height - (r.y + r.h),
+    };
+    const marker = todoMarkerOffsets(size);
+    let edge = "";
+    if (marker) {
+      if (pos.x + marker.right <= r.x) edge = "left";
+      else if (pos.x + marker.left >= r.x + r.w) edge = "right";
+      else if (visibleRatio(pos, size, monitors) < 2 / 3 && over.bottom > 0) edge = "bottom";
+    } else if (visibleRatio(pos, size, monitors) < 2 / 3) {
       let max = 0;
       for (const key of ["left", "right", "bottom"]) {
         if (over[key] > max) {
@@ -1182,10 +1203,10 @@
           edge = key;
         }
       }
-      if (edge) {
-        await enterEdgeHide(edge, r, pos, size);
-        return;
-      }
+    }
+    if (edge) {
+      await enterEdgeHide(edge, r, pos, size);
+      return;
     }
     await snapWindowToEdges();
   }
