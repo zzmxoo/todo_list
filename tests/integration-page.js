@@ -1236,9 +1236,46 @@
 
     await w.setPosition(new PPos(200, 300));
     await sleep(900);
+    let rightInfo = 'no-monitor';
+    try {
+      const monitors = window.__TAURI__.window.availableMonitors
+        ? await window.__TAURI__.window.availableMonitors()
+        : [];
+      const mon =
+        monitors.find((item) => {
+          const left = item.position.x;
+          const top = item.position.y;
+          return (
+            orig.x >= left &&
+            orig.x <= left + item.size.width &&
+            orig.y >= top &&
+            orig.y <= top + item.size.height
+          );
+        }) || monitors[0];
+      if (mon) {
+        const rightEdge = mon.position.x + mon.size.width;
+        const insideRight = rightEdge - size.width + Math.round(markerRight) - 8;
+        await w.setPosition(new PPos(insideRight, 300));
+        await sleep(900);
+        ok(!$('#app').className.includes('edge-hidden'), 'right: marker threshold not reached');
+        const outsideRight = rightEdge - size.width + Math.round(markerRight) + 12;
+        await w.setPosition(new PPos(outsideRight, 300));
+        let hiddenRight = false;
+        for (let i = 0; i < 15 && !hiddenRight; i += 1) {
+          await sleep(200);
+          hiddenRight = $('#app').className.includes('edge-hidden-right');
+        }
+        ok(hiddenRight, 'right: symmetric threshold hides');
+        await w.setPosition(new PPos(200, 300));
+        await sleep(900);
+        rightInfo = 'right ok';
+      }
+    } catch (err) {
+      rightInfo = 'right skip: ' + err.message;
+    }
     await w.setPosition(new PPos(orig.x, orig.y));
     await sleep(600);
-    return 'markerRight=' + Math.round(markerRight);
+    return 'markerRight=' + Math.round(markerRight) + ' ' + rightInfo;
   });
 
   await t('[REG-28] 刚收起时鼠标仍在窄边不会自动弹出，移开再回才唤出', async () => {

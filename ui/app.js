@@ -866,8 +866,8 @@
     if (!els.app) return;
     els.app.style.transition = "none";
     els.app.style.transformOrigin = edgeOrigin(edge);
-    els.app.style.transform = "scale(0.55)";
-    els.app.style.opacity = "0.08";
+    els.app.style.transform = "scale(0.72)";
+    els.app.style.opacity = "0.12";
   }
 
   function runEdgeContent(edge, hiding, duration) {
@@ -876,8 +876,8 @@
     const ms = Math.max(120, Math.round(duration * 1.1));
     els.app.style.transformOrigin = edgeOrigin(edge);
     els.app.style.transition = `transform ${ms}ms cubic-bezier(0.45, 0, 0.55, 1), opacity ${ms}ms cubic-bezier(0.45, 0, 0.55, 1)`;
-    els.app.style.transform = hiding ? "scale(0.55)" : "scale(1)";
-    els.app.style.opacity = hiding ? "0.08" : "1";
+    els.app.style.transform = hiding ? "scale(0.72)" : "scale(1)";
+    els.app.style.opacity = hiding ? "0.12" : "1";
   }
 
   function resetEdgeTransform() {
@@ -980,6 +980,8 @@
     await animateWindowTo(hidden.x, hidden.y, EDGE_HIDE_ANIM_MS, () =>
       runEdgeContent(edge, true, EDGE_HIDE_ANIM_MS)
     );
+    // 等内容淡出/缩小彻底结束，再换上窄条，避免最后一帧闪一下又弹出
+    await new Promise((resolve) => setTimeout(resolve, Math.round(EDGE_HIDE_ANIM_MS * 0.12)));
     showEdgePeek(edge);
     resetEdgeTransform();
   }
@@ -1010,9 +1012,9 @@
     const edge = edgeHide.edge;
     prepareEdgeContent(edge);
     hideEdgePeek();
-    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS, () =>
-      runEdgeContent(edge, false, EDGE_SHOW_ANIM_MS)
-    );
+    // 先启动内容展开，再让 Rust 移动窗口：避免 IPC 往返造成“先卡一下再弹”
+    runEdgeContent(edge, false, EDGE_SHOW_ANIM_MS);
+    await animateWindowTo(edgeHide.shown.x, edgeHide.shown.y, EDGE_SHOW_ANIM_MS);
     resetEdgeTransform();
   }
 
@@ -1025,6 +1027,7 @@
     await animateWindowTo(edgeHide.hidden.x, edgeHide.hidden.y, EDGE_HIDE_ANIM_MS, () =>
       runEdgeContent(edge, true, EDGE_HIDE_ANIM_MS)
     );
+    await new Promise((resolve) => setTimeout(resolve, Math.round(EDGE_HIDE_ANIM_MS * 0.12)));
     showEdgePeek(edge);
     resetEdgeTransform();
   }
@@ -1192,8 +1195,10 @@
     const marker = todoMarkerOffsets(size);
     let edge = "";
     if (marker) {
-      if (pos.x + marker.right <= r.x) edge = "left";
-      else if (pos.x + marker.left >= r.x + r.w) edge = "right";
+      const offLeft = r.x - pos.x;
+      const offRight = pos.x + size.width - (r.x + r.w);
+      if (offLeft >= marker.right) edge = "left";
+      else if (offRight >= marker.right) edge = "right";
       else if (visibleRatio(pos, size, monitors) < 2 / 3 && over.bottom > 0) edge = "bottom";
     } else if (visibleRatio(pos, size, monitors) < 2 / 3) {
       let max = 0;

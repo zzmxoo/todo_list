@@ -50,6 +50,7 @@ body {
   border-radius: var(--radius);
   overflow: hidden;
   isolation: isolate;
+  will-change: transform, opacity;
   background: transparent;
   opacity: 0;
   transition: opacity 180ms ease;
@@ -79,7 +80,6 @@ body {
 #app.edge-hidden::before { opacity: 0; }
 #app.edge-hidden .edge-peek {
   display: block;
-  animation: peek-in 200ms ease both;
 }
 
 #app.edge-hidden-top .edge-peek {
