@@ -50,13 +50,39 @@ jobs:
       - name: 单元测试
         shell: pwsh
         working-directory: src-tauri
-        run: cargo test --release
+        run: |
+          $out = cargo test --release 2>&1
+          $out | Write-Host
+          $text = $out -join "`n"
+          $matches = [regex]::Matches($text, 'test result: [^.]+\. (\d+) passed')
+          $n = ($matches | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Sum).Sum
+          if ($n -lt 42) {
+            Write-Host "::error::Rust 单测只有 $n 条，expected at least 42"
+            exit 1
+          }
 
       # 完整 UI 回归依赖真实 WebView2 窗口与 CDP，打 tag 前在本地跑：
       #   powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 
+      - name: 打包并发布
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tauriScript: cargo tauri
+          args: --bundles nsis
+          tagName: ${{ github.ref_name }}
+          releaseName: 桌面待办 ${{ github.ref_name }}
+          releaseBody: ${{ steps.changelog.outputs.body }}
+          releaseDraft: true
+          prerelease: false
+          generateReleaseNotes: false
+          uploadPlainBinary: true
+          releaseAssetNamePattern: '[mainBinaryName]_[version][setup].[ext]'
+
       # MSIX 供 Microsoft Store 上架；Tauri 没有 msix 目标，用 makeappx 手工打包。
-      # 必须在发布 Release 之前完成，否则 MSIX 失败会留下一个缺资产的公开 Release。
+      # 必须放在 draft Release 生成之后：这里才能保证 release exe 已由 tauri-action 构建。
       # 身份参数从仓库 Variables 读取（Settings → Secrets and variables → Actions → Variables）：
       #   MSIX_IDENTITY_NAME / MSIX_PUBLISHER / MSIX_PUBLISHER_DISPLAY_NAME
       # 未配置时跳过，避免产出无法上架的占位包。
@@ -75,23 +101,6 @@ jobs:
           ./tests/build-msix.ps1 -IdentityName $id -Publisher $pub -PublisherDisplayName $pd
           $msix = Get-ChildItem src-tauri/target/msix/*.msix | Select-Object -First 1
           "path=$($msix.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: 打包并发布
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: .
-          tauriScript: cargo tauri
-          args: --bundles nsis
-          tagName: ${{ github.ref_name }}
-          releaseName: 桌面待办 ${{ github.ref_name }}
-          releaseBody: ${{ steps.changelog.outputs.body }}
-          releaseDraft: true
-          prerelease: false
-          generateReleaseNotes: false
-          uploadPlainBinary: true
-          releaseAssetNamePattern: '[mainBinaryName]_[version][setup].[ext]'
 
       - name: 上传 MSIX 到 Release
         if: steps.msix.outputs.skip != 'true'

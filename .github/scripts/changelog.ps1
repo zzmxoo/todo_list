@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$Tag = $env:GITHUB_REF_NAME,
   [string]$RepoRoot = '.',
@@ -15,8 +15,10 @@ function Fail([string]$message) {
 
 # --- 版本来源 ---------------------------------------------------------------
 if (-not $Tag) { Fail 'Tag 为空，无法生成变更说明' }
-if ($Tag -notmatch '^v?(\d+\.\d+\.\d+)$') { Fail "Tag '$Tag' 不符合版本号格式 v?X.Y.Z" }
-$version = $Matches[1]
+if ($Tag -notmatch '^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+  Fail "Tag '$Tag' 不符合版本号格式 v?X.Y.Z（不允许前导零）"
+}
+$version = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
 
 $cargoToml = Get-Content -LiteralPath 'src-tauri/Cargo.toml' -Raw -Encoding UTF8
 if ($cargoToml -notmatch '(?ms)^\s*\[package\]\s*$(.*?)(?=^\[|\z)') {

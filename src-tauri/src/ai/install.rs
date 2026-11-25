@@ -82,7 +82,11 @@ fn upsert_marketplace(manifest_path: &Path, plugin_dir_name: &str) -> Result<(),
         let root = serde_json::from_str(&text)
             .map_err(|e| format!("marketplace.json 解析失败，已中止且未修改：{e}"))?;
         let backup = manifest_path.with_extension("json.bak-todo");
-        let _ = fs::copy(manifest_path, &backup);
+        // 只在第一次修改前留备份；重复安装不能把「改后」版本覆盖成回滚点。
+        if !backup.exists() {
+            fs::copy(manifest_path, &backup)
+                .map_err(|e| format!("备份 marketplace.json 失败，已中止且未修改：{e}"))?;
+        }
         root
     } else {
         json!({ "plugins": [] })
@@ -183,6 +187,13 @@ fn take_value(args: &[String], index: usize, flag: &str) -> Option<(String, usiz
 
 /// 返回 Some(exit_code) 表示这是安装命令，不启动 GUI。
 pub fn run(args: &[String]) -> Option<i32> {
+    // 只有安装命令才解析参数；普通启动不能因为别的参数被误判。
+    if !args
+        .iter()
+        .any(|arg| arg == "--install-mcp" || arg.starts_with("--install-mcp="))
+    {
+        return None;
+    }
     let mut client = None;
     let mut exe = None;
     let mut index = 0;
@@ -206,6 +217,9 @@ pub fn run(args: &[String]) -> Option<i32> {
                 eprintln!("desktop-todo: --exe 需要程序路径");
                 return Some(2);
             }
+        } else if arg.starts_with('-') {
+            eprintln!("desktop-todo: 未知参数 {arg}");
+            return Some(2);
         } else {
             index += 1;
         }
@@ -283,6 +297,14 @@ mod tests {
         .unwrap();
         assert!(mcp.contains("--mcp"));
         assert!(mcp.contains("desktop-todo.exe"));
+        let backup = local
+            .join(".codebuddy-plugin")
+            .join("marketplace.json.bak-todo");
+        let backupText = fs::read_to_string(backup).unwrap();
+        assert!(
+            !backupText.contains("desktop-todo"),
+            "backup must keep the pre-install version"
+        );
         let _ = fs::remove_dir_all(home);
     }
 
@@ -295,6 +317,16 @@ mod tests {
         assert!(err.contains("解析失败"), "unexpected error: {err}");
         assert_eq!(fs::read_to_string(&manifest).unwrap(), "{bad");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unknown_install_arg_is_error() {
+        let args = vec![
+            "desktop-todo.exe".to_string(),
+            "--install-mcp=generic".to_string(),
+            "--typo".to_string(),
+        ];
+        assert_eq!(run(&args), Some(2));
     }
 
     #[test]

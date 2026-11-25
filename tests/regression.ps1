@@ -28,16 +28,16 @@ $skipped = 0
 # 先验证备份守卫本身，再接触任何用户数据。
 $libOut = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-regress-lib.ps1')
 $libOut | ForEach-Object { $_ }
-$passed += @($libOut | Where-Object { $_ -like 'PASS  *' }).Count
-$failed += @($libOut | Where-Object { $_ -like 'FAIL  *' }).Count
+$passed += @($libOut | Where-Object { $_ -match '^PASS\s' }).Count
+$failed += @($libOut | Where-Object { $_ -match '^FAIL\s' }).Count
 if ($LASTEXITCODE -ne 0 -and $failed -eq 0) {
   $failed += 1
   'FAIL  regress-lib self-test'
 }
 # 子进程空跑 / 用例被注释但 exit 0 时，计数会是 0；必须要求最低条数。
-if ($passed -lt 6) {
+if ($passed -lt $MIN_REGRESS_LIB_CASES) {
   $failed += 1
-  "FAIL  regress-lib self-test only $passed cases, expected at least 6"
+  "FAIL  regress-lib self-test only $passed cases, expected at least $MIN_REGRESS_LIB_CASES"
 }
 if ($failed -gt 0) {
   "REGRESSION pass=$passed fail=$failed skip=$skipped"
@@ -54,10 +54,19 @@ function Stop-App {
     Invoke-CimMethod -InputObject $proc -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null
   }
   Start-Sleep -Milliseconds 400
+  # 杀不干净时绝不能继续：运行中的实例会在恢复后用内存状态覆盖用户数据。
+  if (Get-Process -Name desktop-todo -ErrorAction SilentlyContinue) {
+    throw 'desktop-todo 未能停止（可能由管理员启动或被安全软件拦截），已中止以免覆盖用户数据'
+  }
 }
 
 $exe = $null
 $backupCreated = $false
+$dataExisted = $null
+$autostartExisted = $false
+$autostartValue = $null
+$autostartSnapshotTaken = $false
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 function Eval-Expr([string]$expr) {
   # Windows 命令行上限约 32KB，集成脚本已超过，统一走临时文件传递。
@@ -96,6 +105,13 @@ function Report-Cases($result, [string]$prefix) {
 try {
   # 守卫、构建、备份都放在 try 内：任何一步抛错，finally 仍会重启发布版。
   Stop-App
+  # REG-23 会写入测试 exe 的路径；这里快照用户真实的 Run 值，结束后原样回填。
+  $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+  $autostartProp = Get-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
+  $autostartExisted = $null -ne $autostartProp
+  $autostartValue = if ($autostartExisted) { $autostartProp.DesktopTodo } else { $null }
+  $autostartSnapshotTaken = $true
+  $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
 
   # 测试用 exe：编译期注入调试端口，产物隔离在 src-tauri\target-test\。
@@ -107,6 +123,7 @@ try {
   Stop-App
 
   if (-not $SkipRust) {
+    $rustPassed = 0
     # Rust 侧只测纯函数（缓动、插值、注册表命令参数），不启动窗口。
     Push-Location (Join-Path $root 'src-tauri')
     try {
@@ -119,12 +136,17 @@ try {
     $rustSummary = $rustOut | Select-String 'test result: [^.]+\. (\d+) passed; (\d+) failed'
     if ($rustSummary) {
       foreach ($match in $rustSummary.Matches) {
+        $rustPassed += [int]$match.Groups[1].Value
         $passed += [int]$match.Groups[1].Value
         $failed += [int]$match.Groups[2].Value
       }
     } elseif ($rustCode -ne 0) {
       $failed += 1
       'FAIL  RUST cargo test'
+    }
+    if ($rustPassed -lt $MIN_RUST_CASES) {
+      $failed += 1
+      "FAIL  RUST only $rustPassed tests, expected at least $MIN_RUST_CASES"
     }
   }
 
@@ -144,10 +166,16 @@ try {
   if (-not $SkipUnits) {
     # 自动发现 unit-*.js，避免新增文件只在一处登记、另一处静默漏跑。
     $unitFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'unit-*.js' | Sort-Object Name)
+    $unitPassed = 0
     foreach ($file in $unitFiles) {
       $expr = Get-Content $file.FullName -Raw -Encoding UTF8
       $result = (Eval-Expr $expr) | ConvertFrom-Json
       Report-Cases $result "UNIT[$($file.Name)]"
+      $unitPassed += [int]$result.passed
+    }
+    if ($unitPassed -lt $MIN_UNIT_CASES) {
+      $failed += 1
+      "FAIL  UNIT only $unitPassed cases, expected at least $MIN_UNIT_CASES"
     }
 
     $quotesExpr = @'
@@ -180,9 +208,9 @@ fetch('quotes.json')
   if (-not $value) { throw 'integration script did not return results' }
   $result = $value | ConvertFrom-Json
   Report-Cases $result 'INTEGRATION'
-  if (@($result.results).Count -lt 46) {
+  if (@($result.results).Count -lt $MIN_INTEGRATION_CASES) {
     $failed += 1
-    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least 46"
+    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least $MIN_INTEGRATION_CASES"
   }
 
   # REG-46 端到端：损坏的 data.json 不能被静默写成空壳。
@@ -242,6 +270,22 @@ finally {
       $failed += 1
       "FAIL  恢复用户数据失败：$($_.Exception.Message)"
       "      备份保留在 $backup，请人工确认后再运行回归"
+    }
+  } elseif ($dataExisted -eq $false -and (Test-Path -LiteralPath $data)) {
+    # 首次安装本来没有 data.json：测试新建的那份含测试设置，不能留给用户。
+    Remove-Item -LiteralPath $data -Force -ErrorAction SilentlyContinue
+  }
+  # REG-23 会开启自启（写入测试 exe 路径）；只有确实快照过才回填。
+  if ($autostartSnapshotTaken) {
+    try {
+      if ($autostartExisted) {
+        Set-ItemProperty -Path $runKey -Name 'DesktopTodo' -Value $autostartValue
+      } else {
+        Remove-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
+      }
+    } catch {
+      $failed += 1
+      "FAIL  恢复开机启动注册表失败：$($_.Exception.Message)"
     }
   }
   $inbox = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'

@@ -44,6 +44,12 @@
     eq(core.solarTermOn(new Date(2026, 10, 21)), '');
   });
 
+  test('solarTermOn 一月节气与跨年', () => {
+    eq(core.solarTermOn(new Date(2026, 0, 5)), '小寒');
+    eq(core.solarTermOn(new Date(2026, 0, 20)), '大寒');
+    eq(core.solarTermOn(new Date(2025, 11, 21)), '冬至');
+  });
+
   test('clipSegment 跨月只保留本月', () => {
     const clip = core.clipSegment(
       new Date(2026, 0, 28),
@@ -183,13 +189,21 @@
     eq(lines[0], '2026-10-01 09:00，2026-11-10 08:05，A');
     eq(lines[1], '2026-11-01 09:00，2026-11-17 10:30，B');
     eq(core.buildExportText([], now, 30), '');
+    const multiline = core.buildExportText(
+      [{ text: '第一行\n第二行', done: true, created: '2026-11-01T09:00:00', done_at: '2026-11-17T10:30:00' }],
+      now,
+      30
+    );
+    eq(multiline.trim().split('\r\n').length, 1);
+    ok(multiline.includes('第一行 第二行'));
   });
 
   test('透明度按 gamma 2.2 映射并可逆', () => {
     eq(core.opacityFromTransparency(0), 1);
     eq(core.opacityFromTransparency(1), 0);
-    ok(Math.abs(core.opacityFromTransparency(0.5) - Math.pow(0.5, 1 / 2.2)) < 1e-9, '50%');
-    ok(Math.abs(core.transparencyFromOpacity(0.5) - (1 - Math.pow(0.5, 2.2))) < 1e-9, '反向');
+    // 独立期望值，避免断言照抄实现公式
+    ok(Math.abs(core.opacityFromTransparency(0.5) - 0.72974) < 1e-4, '50%');
+    ok(Math.abs(core.transparencyFromOpacity(0.5) - 0.78236) < 1e-4, '反向');
     const alpha = core.opacityFromTransparency(0.41);
     ok(Math.abs(core.transparencyFromOpacity(alpha) - 0.41) < 1e-9, '往返');
     ok(core.opacityFromTransparency(0.5) > 0.7, '50% 应保持较高不透明度');
@@ -211,6 +225,18 @@
     eq(list[1].source, null);
     eq(list[1].provider, null);
     ok(typeof list[1].id === 'string' && list[1].id.length > 0, 'generated id');
+  });
+
+  test('validateLoadedState 拒绝非数组 todos', () => {
+    eq(core.validateLoadedState({ todos: [] }).todos.length, 0);
+    eq(core.validateLoadedState({ settings: {} }).settings !== undefined, true);
+    let threw = false;
+    try {
+      core.validateLoadedState({ todos: { a: 1 } });
+    } catch (err) {
+      threw = /todos/.test(err.message);
+    }
+    ok(threw, 'non-array todos must throw');
   });
 
   const passed = results.filter((r) => r.ok).length;

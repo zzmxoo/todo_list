@@ -1,15 +1,33 @@
 ﻿param([int]$Port = 9222)
 $ErrorActionPreference = 'Stop'
+
+# 与 regression.ps1 / integration.ps1 共用互斥量，避免同抢 CDP 端口。
+$regressionMutex = New-Object System.Threading.Mutex($false, 'Local\TodoRegression')
+$owned = $false
+try { $owned = $regressionMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { throw '另一个回归进程正在运行（run.ps1 / integration.ps1 / regression.ps1）' }
+
 $cdp = Join-Path (Split-Path $PSScriptRoot -Parent) '_dev_cdp.ps1'
+. (Join-Path $PSScriptRoot 'regress-lib.ps1')
 
 function Eval-Expr([string]$expr) {
-  $raw = & powershell -NoProfile -ExecutionPolicy Bypass -File $cdp -Port $Port -Expr $expr
+  # Windows 命令行上限约 32KB，统一走临时文件。
+  $tempPath = $env:TEMP
+  if (-not $tempPath) { $tempPath = [System.IO.Path]::GetTempPath() }
+  $tmp = Join-Path $tempPath ('todo-run-' + [guid]::NewGuid().ToString('N') + '.js')
+  [System.IO.File]::WriteAllText($tmp, $expr, (New-Object System.Text.UTF8Encoding($false)))
+  try {
+    $raw = & powershell -NoProfile -ExecutionPolicy Bypass -File $cdp -Port $Port -ExprFile $tmp
+  } finally {
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+  }
   $obj = ($raw | Select-Object -Last 1) | ConvertFrom-Json
   if ($obj.result.result.value) { return $obj.result.result.value }
   throw (($obj.result.result.description) + ' ' + $obj.result.result.className)
 }
 
 $failed = 0
+$unitPassed = 0
 $unitFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'unit-*.js' | Sort-Object Name)
 foreach ($file in $unitFiles) {
   $expr = Get-Content $file.FullName -Raw -Encoding UTF8
@@ -20,6 +38,7 @@ foreach ($file in $unitFiles) {
     else { "FAIL  $($case.name): $($case.error)" }
   }
   "UNIT[$($file.Name)] pass=$($result.passed) fail=$($result.failed)"
+  $unitPassed += [int]$result.passed
   $failed += [int]$result.failed
 }
 
@@ -40,6 +59,14 @@ fetch('quotes.json')
 '@
 $quotes = Eval-Expr $quotesExpr | ConvertFrom-Json
 "QUOTES total=$($quotes.total) unique=$($quotes.unique) dup=$($quotes.dup) badLen=$($quotes.badLen) badAuthor=$($quotes.badAuthor)"
-if ($failed -gt 0 -or $quotes.total -ne 1313 -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
-  exit 1
+$exitCode = 0
+if ($unitPassed -lt $MIN_UNIT_CASES) {
+  "FAIL  单元测试只有 $unitPassed 条，expected at least $MIN_UNIT_CASES"
+  $exitCode = 1
 }
+if ($failed -gt 0 -or $quotes.total -ne 1313 -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
+  $exitCode = 1
+}
+try { $regressionMutex.ReleaseMutex() } catch { }
+$regressionMutex.Dispose()
+if ($exitCode -ne 0) { exit 1 }

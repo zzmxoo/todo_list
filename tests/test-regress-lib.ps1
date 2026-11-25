@@ -94,4 +94,8 @@ try {
 }
 
 "REGRESS-LIB pass=$passed fail=$failed"
+if ($passed -lt $MIN_REGRESS_LIB_CASES) {
+  "FAIL  守卫自测只有 $passed 条，expected at least $MIN_REGRESS_LIB_CASES"
+  $failed += 1
+}
 if ($failed -gt 0) { exit 1 }

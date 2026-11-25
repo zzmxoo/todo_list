@@ -65,7 +65,12 @@
       .sort((a, b) => a.at - b.at);
     if (!items.length) return "";
     const lines = items.map(({ todo }) =>
-      [formatStamp(todo.created), formatStamp(todo.done_at), todo.text].join("，")
+      [
+        formatStamp(todo.created),
+        formatStamp(todo.done_at),
+        // 待办里可能有换行，导出时必须压成一行，否则会伪造出多条记录。
+        String(todo.text).replace(/\r?\n/g, " "),
+      ].join("，")
     );
     return lines.join("\r\n") + "\r\n";
   }
@@ -152,6 +157,19 @@
       }));
   }
 
+  // todos 字段存在但不是数组时不能静默当空清单，否则下一次保存会覆盖原数据。
+  function validateLoadedState(loaded) {
+    if (
+      loaded &&
+      typeof loaded === "object" &&
+      Object.prototype.hasOwnProperty.call(loaded, "todos") &&
+      !Array.isArray(loaded.todos)
+    ) {
+      throw new Error("data.json 的 todos 不是数组，已停止写入");
+    }
+    return loaded;
+  }
+
   return {
     SOLAR_TERMS,
     pad2,
@@ -166,6 +184,7 @@
     opacityFromTransparency,
     transparencyFromOpacity,
     normalizeTodos,
+    validateLoadedState,
     newTodoId,
   };
 });

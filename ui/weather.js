@@ -190,7 +190,8 @@
     if (!Number.isFinite(humidity)) humidity = 0;
     else if (humidity <= 1) humidity *= 100;
 
-    const windMs = Number(realtime.wind?.speed);
+    // 彩云 realtime.wind.speed 的单位是 km/h，不能当 m/s 再乘 3.6。
+    const windKmh = Number(realtime.wind?.speed);
     return {
       city: ctx.city || "",
       lat: ctx.lat ?? null,
@@ -199,7 +200,7 @@
         temp: round(realtime.temperature, days[0].hi),
         code: fromCaiyunSkycon(realtime.skycon),
         humidity: Math.round(humidity),
-        wind: Number.isFinite(windMs) ? Math.round(windMs * 3.6) : 0,
+        wind: Number.isFinite(windKmh) ? Math.round(windKmh) : 0,
       },
       daily: days,
       ts: Date.now() / 1000,

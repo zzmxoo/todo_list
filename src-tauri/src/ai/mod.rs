@@ -29,10 +29,20 @@ pub const INBOX_DIR: &str = "ai-inbox";
 
 static AI_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// 仅测试构建启用：集成测试用临时数据目录，避免碰用户真实 data.json。
+#[cfg(feature = "test-data-dir")]
+pub fn data_dir_override() -> Option<PathBuf> {
+    std::env::var_os("DESKTOP_TODO_DATA_DIR").map(PathBuf::from)
+}
+
+#[cfg(not(feature = "test-data-dir"))]
+pub fn data_dir_override() -> Option<PathBuf> {
+    None
+}
+
 /// 不依赖 Tauri AppHandle 的数据目录，供 `--mcp` / `--add` 进程使用。
 pub fn data_dir() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("DESKTOP_TODO_DATA_DIR") {
-        let dir = PathBuf::from(path);
+    if let Some(dir) = data_dir_override() {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         return Ok(dir);
     }
@@ -91,21 +101,58 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
 }
 
-/// 原子写 JSON：临时文件 + rename，避免桌面端/外部进程读到半截文件。
+/// 原子替换：std::fs::rename 在 Windows 已能覆盖，但这里显式用
+/// MoveFileEx(REPLACE_EXISTING|WRITE_THROUGH)，保证替换原子且写穿透到磁盘。
+#[cfg(windows)]
+pub(crate) fn atomic_replace(tmp: &Path, dst: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32;
+    }
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    let from: Vec<u16> = tmp.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = dst.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        ) != 0
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn atomic_replace(tmp: &Path, dst: &Path) -> bool {
+    fs::rename(tmp, dst).is_ok()
+}
+
+/// 原子写 JSON：临时文件 + 原子替换，避免桌面端/外部进程读到半截文件。
 /// 临时文件名带 PID：双开时两个进程不会共用同一个临时文件。
+/// 替换失败只重试并返回错误，绝不退化成就地 copy（那会制造半截文件）。
 pub fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    use std::io::Write;
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("data.json");
     let tmp = path.with_file_name(format!("{name}.{}.tmp", std::process::id()));
     let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
-    fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    if fs::rename(&tmp, path).is_err() {
-        fs::copy(&tmp, path).map_err(|e| e.to_string())?;
-        let _ = fs::remove_file(&tmp);
+    let mut file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    drop(file);
+    for attempt in 0..3 {
+        if atomic_replace(&tmp, path) {
+            return Ok(());
+        }
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
-    Ok(())
+    let _ = fs::remove_file(&tmp);
+    Err(format!("替换 {} 失败（文件可能被杀软或其它进程占用）", path.display()))
 }
 
 #[cfg(test)]

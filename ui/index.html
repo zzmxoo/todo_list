@@ -88,6 +88,11 @@
     <div class="cal-grid" id="calGrid" data-tauri-drag-region></div>
   </section>
 
+  <div class="undo-toast" id="undoToast" hidden>
+    <span id="undoText"></span>
+    <button class="btn small primary" id="undoBtn" type="button">撤销</button>
+  </div>
+
   <div class="settings-overlay" id="settingsOverlay" hidden>
     <div class="settings" id="settingsPanel">
       <div class="settings-head">
@@ -191,7 +196,7 @@
                 <div class="set-label">极简模式</div>
                 <div class="set-desc">待办单行显示，超出用 … 省略，与日历模式互斥</div>
               </div>
-              <div class="switch" id="minimalSwitch" role="switch" aria-checked="false"><span></span></div>
+              <div class="switch" tabindex="0" id="minimalSwitch" role="switch" aria-checked="false"><span></span></div>
             </div>
 
             <div class="set-row">
@@ -199,7 +204,7 @@
                 <div class="set-label">日历模式</div>
                 <div class="set-desc">日历页显示事项时长与天气，与极简模式互斥</div>
               </div>
-              <div class="switch" id="calendarSwitch" role="switch" aria-checked="false"><span></span></div>
+              <div class="switch" tabindex="0" id="calendarSwitch" role="switch" aria-checked="false"><span></span></div>
             </div>
 
             <div class="set-row">
@@ -207,7 +212,7 @@
                 <div class="set-label">窗口置顶</div>
                 <div class="set-desc">始终显示在其他窗口上方</div>
               </div>
-              <div class="switch" id="topSwitch" role="switch" aria-checked="true"><span></span></div>
+              <div class="switch" tabindex="0" id="topSwitch" role="switch" aria-checked="true"><span></span></div>
             </div>
 
             <div class="set-row">
@@ -215,7 +220,7 @@
                 <div class="set-label">不在任务栏显示</div>
                 <div class="set-desc">不占用任务栏，图标放进系统托盘的隐藏区域</div>
               </div>
-              <div class="switch" id="taskbarSwitch" role="switch" aria-checked="false"><span></span></div>
+              <div class="switch" tabindex="0" id="taskbarSwitch" role="switch" aria-checked="false"><span></span></div>
             </div>
 
             <div class="set-row">
@@ -223,7 +228,7 @@
                 <div class="set-label">允许开机启动</div>
                 <div class="set-desc">登录 Windows 后自动启动本程序</div>
               </div>
-              <div class="switch" id="autostartSwitch" role="switch" aria-checked="false"><span></span></div>
+              <div class="switch" tabindex="0" id="autostartSwitch" role="switch" aria-checked="false"><span></span></div>
             </div>
 
             <div class="set-row" id="exportRow">

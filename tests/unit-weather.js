@@ -87,7 +87,7 @@
     const w = api.normalizeCaiyun(data, { city: '杭州' });
     eq(w.current.temp, 19);
     eq(w.current.humidity, 62);
-    eq(w.current.wind, 18);
+    eq(w.current.wind, 5); // 彩云 speed 已是 km/h，不能再乘 3.6
     eq(w.current.code, 1);
     eq(w.daily[0].code, 61);
     eq(w.daily[0].hi, 22);

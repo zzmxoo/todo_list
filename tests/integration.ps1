@@ -22,14 +22,28 @@ function Stop-App {
     Invoke-CimMethod -InputObject $proc -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null
   }
   Start-Sleep -Milliseconds 400
+  if (Get-Process -Name desktop-todo -ErrorAction SilentlyContinue) {
+    throw 'desktop-todo 未能停止（可能由管理员启动或被安全软件拦截），已中止以免覆盖用户数据'
+  }
 }
 
 $exe = $null
 $backupCreated = $false
 $restoreFailed = $false
+$registryRestoreFailed = $false
+$dataExisted = $null
+$autostartExisted = $false
+$autostartValue = $null
+$autostartSnapshotTaken = $false
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 try {
   # 守卫、构建、备份都放在 try 内：任何一步抛错，finally 仍会重启发布版。
   Stop-App
+  $autostartProp = Get-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
+  $autostartExisted = $null -ne $autostartProp
+  $autostartValue = if ($autostartExisted) { $autostartProp.DesktopTodo } else { $null }
+  $autostartSnapshotTaken = $true
+  $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
 
   # 测试用 exe 由编译期注入调试端口生成，产物在 src-tauri\target-test\，
@@ -78,9 +92,9 @@ try {
   }
   "INTEGRATION pass=$($result.passed) fail=$($result.failed) skip=$($result.skipped)"
   $failed = [int]$result.failed
-  if (@($result.results).Count -lt 46) {
+  if (@($result.results).Count -lt $MIN_INTEGRATION_CASES) {
     $failed += 1
-    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least 46"
+    "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least $MIN_INTEGRATION_CASES"
   }
   if ([int]$result.skipped -gt 0) {
     "WARN  $($result.skipped) case(s) skipped（网络 / 显示器不满足），本次全绿不代表这些用例已执行"
@@ -95,6 +109,22 @@ try {
     } catch {
       $restoreFailed = $true
       Write-Warning "恢复用户数据失败：$($_.Exception.Message)；备份保留在 $backup"
+    }
+  } elseif ($dataExisted -eq $false -and (Test-Path -LiteralPath $data)) {
+    # 首次安装本来没有 data.json：测试新建的那份不能留给用户。
+    Remove-Item -LiteralPath $data -Force -ErrorAction SilentlyContinue
+  }
+  # REG-23 会写入测试 exe 的路径；只有确实快照过才回填。
+  if ($autostartSnapshotTaken) {
+    try {
+      if ($autostartExisted) {
+        Set-ItemProperty -Path $runKey -Name 'DesktopTodo' -Value $autostartValue
+      } else {
+        Remove-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
+      }
+    } catch {
+      $registryRestoreFailed = $true
+      Write-Warning "恢复开机启动注册表失败：$($_.Exception.Message)"
     }
   }
   $inbox = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
@@ -113,4 +143,5 @@ try {
   try { $regressionMutex.ReleaseMutex() } catch { }
   $regressionMutex.Dispose()
   if ($restoreFailed) { throw "恢复用户数据失败，备份保留在 $backup" }
+  if ($registryRestoreFailed) { throw "恢复开机启动注册表失败，请检查 HKCU Run\DesktopTodo" }
 }

@@ -132,8 +132,17 @@ fn add_todos(args: &Value, dir: &Path) -> Result<Value, String> {
             .map_err(|err| format!("第 {} 条：{err}", index + 1))?;
         normalized.push(todo);
     }
-    for todo in &normalized {
-        enqueue(dir, todo)?;
+    for (index, todo) in normalized.iter().enumerate() {
+        if let Err(err) = enqueue(dir, todo) {
+            return Ok(tool_result(
+                format!(
+                    "已添加 {} 条，第 {} 条失败：{err}（请不要整批重试，避免重复）",
+                    index,
+                    index + 1
+                ),
+                true,
+            ));
+        }
     }
     Ok(tool_result(
         format!("已添加 {} 条待办", normalized.len()),
@@ -144,7 +153,13 @@ fn add_todos(args: &Value, dir: &Path) -> Result<Value, String> {
 fn list_open_todos(dir: &Path) -> Result<Value, String> {
     let mut seen = HashSet::new();
     let mut items = Vec::new();
-    for todo in inbox::read_todos(dir) {
+    let root = inbox::read_state_root(&dir.join("data.json"))?;
+    let stored = root
+        .get("todos")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for todo in stored {
         let Some(id) = todo.get("id").and_then(Value::as_str) else {
             continue;
         };
@@ -209,6 +224,10 @@ pub fn handle(request: &Value, dir: &Path) -> Option<Value> {
     if method.starts_with("notifications/") {
         return None;
     }
+    // 通知（无 id）不执行有副作用的 tools/call，也不回包。
+    if id.is_none() {
+        return None;
+    }
     let result = match method {
         "initialize" => Ok(json!({
             "protocolVersion": PROTOCOL_VERSION,
@@ -225,9 +244,6 @@ pub fn handle(request: &Value, dir: &Path) -> Option<Value> {
         "tools/call" => call_tool(request.get("params"), dir),
         _ => Err((-32601, format!("未知方法：{method}"))),
     };
-    if id.is_none() {
-        return None;
-    }
     Some(match result {
         Ok(value) => json!({ "jsonrpc": "2.0", "id": id, "result": value }),
         Err((code, message)) => json!({

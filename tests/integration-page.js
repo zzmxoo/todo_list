@@ -368,9 +368,7 @@
       list.scrollTop = 30;
       await sleep(120);
       const scrollBefore = list.scrollTop;
-      // 窗口较矮 / 行高较大时仍应可滚；不可滚就明确 skip，而不是让断言误红。
-      if (scrollBefore <= 0) return 'skip: list not scrollable';
-
+      const canScroll = scrollBefore > 0;
       const target = findRow(names[0]);
       target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
       let input = null;
@@ -387,11 +385,13 @@
       const kept = $('.edit-input');
       ok(kept, 'edit input preserved after re-render');
       eq(kept.value, 'ITEST-编辑中', 'edit value preserved');
-      ok(
-        list.scrollTop >= scrollBefore - 1,
-        'scroll preserved: ' + list.scrollTop + ' vs ' + scrollBefore
-      );
-      return 'edit+scroll preserved';
+      if (canScroll) {
+        ok(
+          list.scrollTop >= scrollBefore - 1,
+          'scroll preserved: ' + list.scrollTop + ' vs ' + scrollBefore
+        );
+      }
+      return canScroll ? 'edit+scroll preserved' : 'edit preserved (list not scrollable)';
     } finally {
       const active = $('.edit-input');
       if (active) {
@@ -1177,14 +1177,18 @@
       return `immediate registry=${Math.round(changed)}ms restore=${Math.round(restored)}ms`;
     } finally {
       // 用例中途失败也必须把用户的开机启动恢复原状（data.json 恢复不覆盖注册表）。
+      let restoreError = null;
       try {
         if ((await invoke('get_autostart')) !== original) {
           await invoke('set_autostart', { enabled: original });
         }
       } catch (err) {
-        console.warn('autostart restore failed', err);
+        restoreError = err;
       }
       await closeSettings();
+      if (restoreError) {
+        throw new Error('autostart restore failed: ' + ((restoreError && restoreError.message) || restoreError));
+      }
     }
   });
 
@@ -1295,8 +1299,15 @@
     await resetEdge(w);
     const orig = await w.outerPosition();
     const size = await w.outerSize();
-    const marker = $('.todo-row .status') || $('.todo-row .mark-dot');
-    ok(marker, 'todo marker');
+    // 该用例依赖列表里有待办；全新安装/空列表时自己建一条，不能靠用户数据。
+    const fixture = 'ITEST-标记';
+    await addTodo(fixture);
+    try {
+      const markerRow = findRow(fixture);
+      ok(markerRow, 'fixture row');
+      const marker =
+        markerRow.querySelector('.status') || markerRow.querySelector('.mark-dot');
+      ok(marker, 'todo marker');
     const appRect = $('#app').getBoundingClientRect();
     const ratio = size.width / window.innerWidth;
     const markerRight = (marker.getBoundingClientRect().right - appRect.left) * ratio;
@@ -1360,6 +1371,9 @@
     }
     const prefix = 'markerRight=' + Math.round(markerRight);
     return rightInfo.startsWith('skip') ? rightInfo + ' ' + prefix : prefix + ' ' + rightInfo;
+    } finally {
+      await deleteTodo(fixture);
+    }
   });
 
   await t('[REG-28] 刚收起时鼠标仍在窄边不会自动弹出，移开再回才唤出', async () => {
@@ -1511,8 +1525,12 @@
       await w.setPosition(new PPos(300, 60));
       await sleep(350);
       await w.setPosition(new PPos(300, 0));
-      await sleep(2800);
-      ok($('#app').className.includes('edge-hidden-top'), 'top hidden: ' + $('#app').className);
+      let topHidden = false;
+      for (let i = 0; i < 25 && !topHidden; i += 1) {
+        await sleep(200);
+        topHidden = $('#app').className.includes('edge-hidden-top');
+      }
+      ok(topHidden, 'top hidden: ' + $('#app').className);
       const peek = $('#edgePeek');
       const r = peek.getBoundingClientRect();
       ok(Math.abs(r.width - window.innerWidth * 0.5) <= 3, 'half width=' + r.width);
@@ -1657,30 +1675,75 @@
     }
   });
 
-  await t('[REG-57] 只读告警提供解除入口，并禁用设置与待办操作', async () => {
-    window.__TEST_LOAD_ERROR('data.json 已损坏，原文件已保留为 data.json.corrupt-1');
-    await sleep(600);
-    ok(!$('#loadError').hidden, 'banner visible');
-    const text = $('#loadErrorText').textContent;
-    ok(/改名/.test(text), 'tells user to rename: ' + text);
-    ok(/不要删除/.test(text), 'warns not to delete: ' + text);
-    ok($('#loadErrorOpen') && $('#loadErrorRetry'), 'recovery buttons');
-    ok($('#addRow').classList.contains('disabled'), 'add row disabled');
-    // 告警条占高度后窗口必须变高，底部添加行不能被 overflow:hidden 裁掉。
-    const addRect = $('#addRow').getBoundingClientRect();
-    const appRect = $('#app').getBoundingClientRect();
-    ok(
-      addRect.bottom <= appRect.bottom + 1,
-      'add row clipped: ' + addRect.bottom + ' > ' + appRect.bottom
+  await t('[REG-67] 双击行内按钮只能作用一次，不能连带删掉下一条', async () => {
+    await addTodo('ITEST-双击-A');
+    await addTodo('ITEST-双击-B');
+    findRow('ITEST-双击-A').querySelector('.act-btn.del').dispatchEvent(
+      new MouseEvent('click', { bubbles: true, detail: 1 })
     );
-    const act = $('.todo-row .act-btn');
-    ok(!act || act.disabled, 'todo action disabled');
-    click($('#settingsBtn'));
-    await sleep(350);
-    ok($('#settingsPanel .settings-body').inert, 'settings body inert');
-    click($('#settingsDone'));
-    await sleep(150);
-    return 'read-only ui, banner in layout';
+    await sleep(200);
+    ok(!findRow('ITEST-双击-A'), 'first click deletes A');
+    const second = findRow('ITEST-双击-B').querySelector('.act-btn.del');
+    second.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }));
+    await sleep(200);
+    ok(findRow('ITEST-双击-B'), 'second click of double-click must be ignored');
+    await deleteTodo('ITEST-双击-B');
+    return 'double click guarded';
+  });
+
+  await t('[REG-68] 误点完成后可通过撤销恢复', async () => {
+    await addTodo('ITEST-撤销');
+    const row = findRow('ITEST-撤销');
+    row.querySelector('.act-btn.done').click();
+    await sleep(250);
+    ok(!findRow('ITEST-撤销'), 'completed hidden');
+    ok(!$('#undoToast').hidden, 'undo toast shown');
+    click($('#undoBtn'));
+    await sleep(250);
+    ok(findRow('ITEST-撤销'), 'undo restores todo');
+    await deleteTodo('ITEST-撤销');
+    return 'undo works';
+  });
+
+  await t('[REG-69] 天气数据形状异常时丢弃而不是启动即只读', async () => {
+    eq(window.__TEST_NORMALIZE_WEATHER({ daily: 'bad' }), null);
+    eq(window.__TEST_NORMALIZE_WEATHER({ daily: [], current: {} }) !== null, true);
+    return 'weather shape guarded';
+  });
+
+  await t('[REG-57] 只读告警提供解除入口，并禁用设置与待办操作', async () => {
+    // 建一条 fixture，保证「待办操作被禁用」不是空列表上的恒真断言。
+    const fixture = 'ITEST-只读';
+    await addTodo(fixture);
+    try {
+      window.__TEST_LOAD_ERROR('data.json 已损坏，原文件已保留为 data.json.corrupt-1');
+      await sleep(600);
+      ok(!$('#loadError').hidden, 'banner visible');
+      const text = $('#loadErrorText').textContent;
+      ok(/data\.json\.corrupt-\*/.test(text), 'tells user to move .corrupt-* out: ' + text);
+      ok(/不要删除/.test(text), 'warns not to delete: ' + text);
+      ok($('#loadErrorOpen') && $('#loadErrorRetry'), 'recovery buttons');
+      ok($('#addRow').classList.contains('disabled'), 'add row disabled');
+      // 告警条占高度后窗口必须变高，底部添加行不能被 overflow:hidden 裁掉。
+      const addRect = $('#addRow').getBoundingClientRect();
+      const appRect = $('#app').getBoundingClientRect();
+      ok(
+        addRect.bottom <= appRect.bottom + 1,
+        'add row clipped: ' + addRect.bottom + ' > ' + appRect.bottom
+      );
+      const act = findRow(fixture).querySelector('.act-btn');
+      ok(act && act.disabled, 'todo action disabled');
+      click($('#settingsBtn'));
+      await sleep(350);
+      ok($('#settingsPanel .settings-body').inert, 'settings body inert');
+      click($('#settingsDone'));
+      await sleep(150);
+      return 'read-only ui, banner in layout';
+    } finally {
+      window.__TEST_RESET_READ_ONLY();
+      await sleep(200);
+      await deleteTodo(fixture);
+    }
   });
 
   const passed = results.filter((r) => r.ok && !r.skipped).length;

@@ -16,10 +16,10 @@ extern "system" {
 }
 
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // 集成测试用 DESKTOP_TODO_DATA_DIR 把数据目录隔离到临时目录，
-    // 避免 REG-46 这类故意写坏数据文件的用例碰用户真实数据。
-    let dir = match std::env::var_os("DESKTOP_TODO_DATA_DIR") {
-        Some(path) => PathBuf::from(path),
+    // 只有测试构建才允许 DESKTOP_TODO_DATA_DIR 覆盖，避免生产环境
+    // 因开发机残留环境变量把数据静默写到别处。
+    let dir = match ai::data_dir_override() {
+        Some(path) => path,
         None => app.path().app_data_dir().map_err(|e| e.to_string())?,
     };
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -55,7 +55,10 @@ fn reveal_data_dir(app: tauri::AppHandle) -> Result<(), String> {
     let dir = data_dir(&app)?;
     #[cfg(windows)]
     {
-        std::process::Command::new("explorer.exe")
+        let explorer = std::env::var_os("SystemRoot")
+            .map(|root| PathBuf::from(root).join("explorer.exe"))
+            .unwrap_or_else(|| PathBuf::from("explorer.exe"));
+        std::process::Command::new(explorer)
             .arg(&dir)
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -163,14 +166,80 @@ fn classify_request_error(err: &reqwest::Error) -> String {
 /// 网络类错误的统一标记，前端据此决定是否退避重试。
 const NET_ERR: &str = "NET_ERR:";
 
+fn ip_blocked(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            ip.is_loopback() || ip.is_private() || ip.is_unspecified() || ip.is_link_local()
+        }
+        std::net::IpAddr::V6(ip) => {
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return ip_blocked(std::net::IpAddr::V4(v4));
+            }
+            let seg = ip.segments();
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || (seg[0] & 0xfe00) == 0xfc00 // fc00::/7 unique local
+                || (seg[0] & 0xffc0) == 0xfe80 // fe80::/10 link local
+        }
+    }
+}
+
+/// 渲染进程的外网通道不接受本机 / 内网地址，避免被当作 SSRF 代理。
+fn is_blocked_host(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return true;
+    };
+    // URL 的 IPv6 host_str 可能带方括号；域名末尾的点等价于根域，也要去掉。
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.');
+    let host_lower = host.to_ascii_lowercase();
+    if host_lower == "localhost" || host_lower.ends_with(".localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(ip_blocked)
+        .unwrap_or(false)
+}
+
 /// 代用户请求接口，绕开 WebView 的跨域限制。
 #[tauri::command]
-async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
+async fn fetch_json(
+    url: String,
+    allow_local: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let allow_local = allow_local.unwrap_or(false);
+    let parsed = reqwest::Url::parse(&url).map_err(|_| "链接格式不正确".to_string())?;
+    if !(parsed.scheme() == "http" || parsed.scheme() == "https") {
         return Err("仅支持 http/https 链接".into());
+    }
+    // 只有用户在「自定义天气接口」里明确填写的地址才允许本机/内网，
+    // 其余调用方（定位、节假日、公共天气）仍按 SSRF 面收口。
+    if !allow_local && is_blocked_host(&parsed) {
+        return Err("不允许访问本机或内网地址".into());
+    }
+    if !allow_local
+        && parsed
+            .host_str()
+            .and_then(|h| h.parse::<std::net::IpAddr>().ok())
+            .is_none()
+    {
+        if let Some(host) = parsed.host_str() {
+            let port = parsed.port_or_known_default().unwrap_or(443);
+            if let Ok(addrs) = tokio::net::lookup_host((host, port)).await {
+                for addr in addrs {
+                    if ip_blocked(addr.ip()) {
+                        return Err("不允许访问本机或内网地址".into());
+                    }
+                }
+            }
+        }
     }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(12))
+        // 不跟随重定向：否则 302 到 127.0.0.1 可以绕过上面的首跳校验。
+        .redirect(reqwest::redirect::Policy::none())
         // OSM Nominatim 使用政策要求可识别的 UA；版本号取 Cargo，避免发版后过期
         .user_agent(concat!(
             "desktop-todo/",
@@ -179,8 +248,8 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
         ))
         .build()
         .map_err(|e| classify_request_error(&e))?;
-    let res = client
-        .get(&url)
+    let mut res = client
+        .get(parsed)
         .send()
         .await
         .map_err(|e| classify_request_error(&e))?;
@@ -192,7 +261,8 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
         let prefix = if retryable { NET_ERR } else { "" };
         return Err(format!("{prefix}请求失败：HTTP {code}"));
     }
-    // 这是渲染进程唯一的外网通道，限制响应体大小，避免异常接口拖垮进程。
+    // 这是渲染进程唯一的外网通道，边读边限制响应体大小，
+    // 不能先 res.bytes() 再校验（chunked 响应会先占满内存）。
     const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
     if res
         .content_length()
@@ -201,14 +271,18 @@ async fn fetch_json(url: String) -> Result<serde_json::Value, String> {
     {
         return Err("响应体过大（超过 2MB）".into());
     }
-    let bytes = res
-        .bytes()
+    let mut body = Vec::new();
+    while let Some(chunk) = res
+        .chunk()
         .await
-        .map_err(|e| classify_request_error(&e))?;
-    if bytes.len() > MAX_BODY_BYTES {
-        return Err("响应体过大（超过 2MB）".into());
+        .map_err(|e| classify_request_error(&e))?
+    {
+        if body.len() + chunk.len() > MAX_BODY_BYTES {
+            return Err("响应体过大（超过 2MB）".into());
+        }
+        body.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes).map_err(|e| format!("数据解析失败：{e}"))
+    serde_json::from_slice(&body).map_err(|e| format!("数据解析失败：{e}"))
 }
 
 const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
@@ -342,11 +416,12 @@ fn has_package_identity() -> bool {
     extern "system" {
         fn GetCurrentPackageFullName(len: *mut u32, name: *mut u16) -> i32;
     }
-    // APPMODEL_ERROR_NO_PACKAGE = 15700
-    const APPMODEL_ERROR_NO_PACKAGE: i32 = 15700;
+    // 传空缓冲区时打包进程返回 ERROR_INSUFFICIENT_BUFFER(122)，
+    // 未打包进程返回 APPMODEL_ERROR_NO_PACKAGE(15700)；其它错误不能当成「已打包」。
+    const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
     let mut len: u32 = 0;
     let rc = unsafe { GetCurrentPackageFullName(&mut len, std::ptr::null_mut()) };
-    rc != APPMODEL_ERROR_NO_PACKAGE
+    rc == ERROR_INSUFFICIENT_BUFFER || rc == 0
 }
 
 #[tauri::command]
@@ -417,7 +492,15 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
-            "quit" => app.exit(0),
+            "quit" => {
+                // 前端先 flush 未落盘的改动；3 秒后兜底退出，避免页面卡死关不掉。
+                let _ = app.emit("tray-quit", ());
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    handle.exit(0);
+                });
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -438,6 +521,11 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 /// 隐藏任务栏按钮，并把托盘图标放进系统托盘的隐藏区域。
 #[tauri::command]
 fn set_taskbar_hidden(
@@ -445,6 +533,10 @@ fn set_taskbar_hidden(
     window: tauri::Window,
     enabled: bool,
 ) -> Result<(), String> {
+    // 托盘不可用时隐藏任务栏会让窗口彻底失联，必须先拒绝。
+    if enabled && app.tray_by_id(TRAY_ID).is_none() {
+        return Err("托盘创建失败，无法隐藏任务栏；请重启程序后重试".into());
+    }
     window
         .set_skip_taskbar(enabled)
         .map_err(|e| e.to_string())?;
@@ -475,26 +567,32 @@ fn already_running() -> bool {
     unsafe { GetLastError() == ERROR_ALREADY_EXISTS }
 }
 
-/// 第二个实例直接退出会让人以为程序打不开（任务栏/托盘可能都被隐藏）。
+/// 无控制台窗口下的兜底提示：启动失败 / 重复启动时至少让用户看到原因。
 #[cfg(windows)]
-fn notify_already_running() {
+fn show_message(text: &str, caption: &str) {
     use std::ffi::c_void;
     #[link(name = "user32")]
     extern "system" {
         fn MessageBoxW(hwnd: *mut c_void, text: *const u16, caption: *const u16, flags: u32) -> i32;
     }
-    let text: Vec<u16> = "桌面待办已经在运行（可能在托盘或任务栏）。\0".encode_utf16().collect();
-    let caption: Vec<u16> = "桌面待办\0".encode_utf16().collect();
+    let text: Vec<u16> = format!("{text}\0").encode_utf16().collect();
+    let caption: Vec<u16> = format!("{caption}\0").encode_utf16().collect();
     const MB_OK: u32 = 0x0;
-    const MB_ICONINFORMATION: u32 = 0x40;
+    const MB_ICONERROR: u32 = 0x10;
     unsafe {
         MessageBoxW(
             std::ptr::null_mut(),
             text.as_ptr(),
             caption.as_ptr(),
-            MB_OK | MB_ICONINFORMATION,
+            MB_OK | MB_ICONERROR,
         );
     }
+}
+
+/// 第二个实例直接退出会让人以为程序打不开（任务栏/托盘可能都被隐藏）。
+#[cfg(all(windows, not(feature = "test-data-dir")))]
+fn notify_already_running() {
+    show_message("桌面待办已经在运行（可能在托盘或任务栏）。", "桌面待办");
 }
 
 fn main() {
@@ -513,6 +611,7 @@ fn main() {
     // 单实例：第二个进程提示后退出，避免两个实例交替覆盖 data.json。
     #[cfg(windows)]
     if already_running() {
+        #[cfg(not(feature = "test-data-dir"))]
         notify_already_running();
         return;
     }
@@ -522,9 +621,23 @@ fn main() {
     unsafe {
         timeBeginPeriod(1);
     }
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // 先让前端 flush 未落盘的改动，再真正销毁；3 秒兜底避免卡死关不掉。
+                api.prevent_close();
+                let _ = window.emit("window-close-request", ());
+                let win = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    let _ = win.destroy();
+                });
+            }
+        })
         .setup(|app| {
-            let _ = build_tray(app.handle());
+            if let Err(err) = build_tray(app.handle()) {
+                eprintln!("tray init failed: {err}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -539,11 +652,17 @@ fn main() {
             animate_window,
             cancel_window_anim,
             set_taskbar_hidden,
+            quit_app,
             get_autostart,
             set_autostart
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run desktop todo widget");
+        .run(tauri::generate_context!());
+    if let Err(err) = result {
+        eprintln!("failed to run desktop todo widget: {err}");
+        #[cfg(windows)]
+        show_message(&format!("启动失败：{err}"), "桌面待办");
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]
@@ -604,6 +723,29 @@ mod tests {
         assert!(args.contains(&AUTOSTART_KEY.to_string()));
         assert!(args.contains(&AUTOSTART_NAME.to_string()));
         assert_eq!(args.last().map(String::as_str), Some("/f"));
+    }
+
+    #[test]
+    fn blocks_local_and_private_fetch_hosts() {
+        for url in [
+            "http://localhost/x",
+            "http://localhost./x",
+            "http://FOO.LOCALHOST/x",
+            "http://foo.localhost/x",
+            "http://127.0.0.1/x",
+            "http://10.0.0.1/x",
+            "http://192.168.1.2/x",
+            "http://169.254.1.1/x",
+            "http://[::1]/x",
+            "http://[fc00::1]/x",
+            "http://[fe80::1]/x",
+            "http://[::ffff:127.0.0.1]/x",
+        ] {
+            let parsed = reqwest::Url::parse(url).unwrap();
+            assert!(is_blocked_host(&parsed), "should block {url}");
+        }
+        let public = reqwest::Url::parse("https://api.open-meteo.com/v1/forecast").unwrap();
+        assert!(!is_blocked_host(&public));
     }
 
     /// HTTP 状态错误不能被前端当成「网络不可用」：否则一次 401 会让

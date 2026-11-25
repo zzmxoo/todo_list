@@ -50,8 +50,8 @@ if (-not $PublisherDisplayName) { $PublisherDisplayName = $conf.productName }
 #   - 其余段为 0–65535，但第一段不能为 0
 # semver 的 0.0.7 不满足"第一段不能为 0"，因此映射为 1.<minor>.<patch>.0。
 $parts = $version.Split('.')
-if ($parts.Count -lt 3 -or $parts.Count -gt 4 -or $parts[0] -notmatch '^\d+$') {
-  throw "不支持的版本号格式：$version（应为 x.y.z 或 x.y.z.w）"
+if ($parts.Count -ne 3 -or $parts[0] -notmatch '^\d+$') {
+  throw "不支持的版本号格式：$version（只接受 x.y.z，四段版本会丢 revision）"
 }
 foreach ($seg in $parts) {
   if ($seg -notmatch '^\d+$' -or [int]$seg -gt 65535) {
@@ -141,18 +141,32 @@ Write-Host "manifest: Identity=$IdentityName Publisher=$Publisher Version=$msixV
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $msix = Join-Path $OutDir "DesktopTodo_${version}_x64.msix"
 if (Test-Path $msix) { Remove-Item $msix -Force }
-& $makeappx pack /d $stage /p $msix /o 2>&1 | ForEach-Object { Write-Host $_ }
-if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
+try {
+  & $makeappx pack /d $stage /p $msix /o 2>&1 | ForEach-Object { Write-Host $_ }
+  if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
+} catch {
+  # 失败时清掉半成品，避免后续 Get-ChildItem *.msix 误当成品上传。
+  if (Test-Path $msix) { Remove-Item $msix -Force -ErrorAction SilentlyContinue }
+  Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+  throw
+}
 Write-Host "built: $msix"
 
 # 签名（可选）
+# 签名（可选）：用 Import-PfxCertificate 把口令留在进程内，
+# signtool 只接收证书指纹，避免 /p <password> 出现在子进程命令行。
 if ($Pfxn) {
-  # 注意：签名口令会出现在命令行参数里，不要在共享机器上使用本地签名。
-  $signArgs = @('sign', '/fd', 'SHA256', '/f', $Pfxn, '/p', $Password, $msix)
+  if (-not $Password) { throw '使用 -Pfxn 时必须通过 -Password 或 MSIX_CERT_PASSWORD 提供口令' }
   if (-not (Test-Path $signtool)) { throw 'signtool.exe not found' }
-  & $signtool @signArgs 2>&1 | ForEach-Object { Write-Host $_ }
-  if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)" }
-  Write-Host 'signed'
+  $secure = ConvertTo-SecureString $Password -AsPlainText -Force
+  $cert = Import-PfxCertificate -FilePath $Pfxn -Password $secure -CertStoreLocation Cert:\CurrentUser\My -ErrorAction Stop
+  try {
+    & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint $msix 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)" }
+    Write-Host 'signed'
+  } finally {
+    Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue
+  }
 } else {
   Write-Host '未签名。上架前需要签名，或直接提交到 Partner Center 由微软签名。'
 }

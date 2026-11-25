@@ -93,6 +93,7 @@
     badgePlacements,
     buildExportText,
     normalizeTodos,
+    validateLoadedState,
     newTodoId,
   } = window.TodoCore;
 
@@ -210,9 +211,11 @@
 
   const tauri = window.__TAURI__ || {};
   const realInvoke = tauri.core?.invoke || (async () => null);
+  // 只有测试构建的窗口 URL 带 ?test=1，生产环境不暴露测试钩子。
+  const TEST_MODE = new URLSearchParams(window.location.search).has("test");
   // 测试钩子：集成用例用 window.__TEST_INVOKE 注入失败（断网、磁盘只读等），生产环境为空。
   const invoke = (cmd, args) =>
-    typeof window.__TEST_INVOKE === "function"
+    TEST_MODE && typeof window.__TEST_INVOKE === "function"
       ? window.__TEST_INVOKE(cmd, args)
       : realInvoke(cmd, args);
   const win = tauri.window?.getCurrentWindow?.() || null;
@@ -225,7 +228,6 @@
   const els = {};
   let weatherLeft = false;
   let settingsOpen = false;
-  let settingsSavedSize = null;
   let addEditing = false;
   let dueTodoId = null;
   let calAddDue = null;
@@ -233,6 +235,7 @@
   let cellHoverTimer = null;
   let hoverCell = null;
   let infoHideTimer = null;
+  let infoGraceTimer = null;
   const weekScroll = new Map();
   const MAX_BARS = 3;
   const INFO_HIDE_DELAY = 1200;
@@ -246,6 +249,11 @@
   // data.json 读取失败后停止任何写盘：坏文件已被后端改名保留，
   // 此时再保存会生成一份只有默认值的新文件，让用户误以为数据被清空。
   let loadFailed = false;
+  let undoTodoId = null;
+  let undoTimer = null;
+  let lastAct = { id: "", at: 0 };
+  let locateToken = 0;
+  let autostartTouched = false;
   let calPress = null;
   let monthCursor = null;
   let weatherBusy = false;
@@ -263,6 +271,9 @@
   let dragTimer = null;
   let moveSettleTimer = null;
   let edgeHide = null;
+  // 收起/进入动画的代际：弹出或清除会递增，过期的动画收尾必须直接放弃，
+  // 否则会把 edge-hidden 挂回已经弹开的窗口（内容全透明、窗口还在动）。
+  let edgeConcealGen = 0;
   let edgeShowing = false;
   let edgeAnimToken = 0;
   let pendingAnimStart = null;
@@ -450,6 +461,9 @@
     els.loadErrorText = document.getElementById("loadErrorText");
     els.loadErrorOpen = document.getElementById("loadErrorOpen");
     els.loadErrorRetry = document.getElementById("loadErrorRetry");
+    els.undoToast = document.getElementById("undoToast");
+    els.undoText = document.getElementById("undoText");
+    els.undoBtn = document.getElementById("undoBtn");
     els.settingsOverlay = document.getElementById("settingsOverlay");
     els.settingsPanel = document.getElementById("settingsPanel");
     els.settingsClose = document.getElementById("settingsClose");
@@ -546,7 +560,7 @@
     loadFailed = true;
     if (els.loadErrorText) {
       els.loadErrorText.textContent = corrupt
-        ? "数据文件已损坏，已停止写入。请把 data.json.corrupt-* 改名为 data.json 后点「重试」（不要删除）；若正在跑回归，同时检查 data.json.regress / data.json.itest。"
+        ? "数据文件已损坏，已停止写入。请修好 JSON 内容后点「重试」；若不确定内容，请把 data.json.corrupt-* 全部移出该目录后重启（先保留副本，不要删除）。"
         : "数据文件读取失败，已停止写入以免覆盖原文件。请检查文件权限或磁盘后点「重试」。";
       if (detail) els.loadErrorText.textContent += "（" + detail + "）";
     }
@@ -554,7 +568,10 @@
     els.loadError.dataset.reason = "load";
     if (els.addRow) els.addRow.classList.add("disabled");
     const body = els.settingsPanel && els.settingsPanel.querySelector(".settings-body");
-    if (body) body.inert = true;
+    if (body) {
+      body.inert = true;
+      body.classList.add("readonly");
+    }
     if (els.todoList) renderTodos();
     scheduleLayout();
   }
@@ -568,8 +585,12 @@
       els.loadError.dataset.reason = "fatal";
     }
     const body = els.settingsPanel && els.settingsPanel.querySelector(".settings-body");
-    if (body) body.inert = true;
+    if (body) {
+      body.inert = true;
+      body.classList.add("readonly");
+    }
     if (els.addRow) els.addRow.classList.add("disabled");
+    scheduleLayout();
   }
 
   // 保存失败不能只进 console：连续失败时在顶部明确告知，恢复后自动收起。
@@ -599,8 +620,40 @@
       });
     }
     if (els.loadErrorRetry) {
-      els.loadErrorRetry.addEventListener("click", () => window.location.reload());
+      els.loadErrorRetry.addEventListener("click", () => {
+        // 保存失败态不能整页重载：内存里那批未落盘的改动会直接丢。
+        if (els.loadError.dataset.reason === "save") {
+          els.loadErrorRetry.disabled = true;
+          els.loadErrorRetry.textContent = "重试中…";
+          setTimeout(() => {
+            els.loadErrorRetry.disabled = false;
+            els.loadErrorRetry.textContent = "重试";
+          }, 1200);
+          save();
+          return;
+        }
+        window.location.reload();
+      });
     }
+  }
+
+  // 测试钩子：REG-57 结束后恢复可写状态，避免影响后续用例。
+  if (TEST_MODE) {
+    window.__TEST_RESET_READ_ONLY = () => {
+      loadFailed = false;
+      if (els.loadError) {
+        els.loadError.hidden = true;
+        delete els.loadError.dataset.reason;
+      }
+      if (els.addRow) els.addRow.classList.remove("disabled");
+      const body = els.settingsPanel && els.settingsPanel.querySelector(".settings-body");
+      if (body) {
+        body.inert = false;
+        body.classList.remove("readonly");
+      }
+      renderTodos();
+      scheduleLayout();
+    };
   }
 
   async function boot() {
@@ -622,6 +675,7 @@
     loadQuoteSeed();
     try {
       const loaded = await invoke("load_state");
+      validateLoadedState(loaded);
       if (loaded && typeof loaded === "object") {
         if (Array.isArray(loaded.todos)) state.todos = loaded.todos;
         if (loaded.settings && typeof loaded.settings === "object") {
@@ -644,6 +698,7 @@
     renderWeatherPill();
     await scheduleLayout();
     await restorePosition();
+    await refreshMonitorBounds();
     try {
       if (win) await win.setAlwaysOnTop(!!state.settings.always_on_top);
     } catch (err) {
@@ -673,11 +728,14 @@
     loadAiSetup();
     invoke("get_autostart")
       .then((on) => {
+        if (autostartTouched) return; // 用户已手动切换，迟到的查询结果不能覆盖
         state.settings.autostart = !!on;
         setSwitch(els.autostartSwitch, !!on);
       })
       .catch(() => {});
-    invoke("set_taskbar_hidden", { enabled: !!state.settings.hide_taskbar }).catch(() => {});
+    invoke("set_taskbar_hidden", { enabled: !!state.settings.hide_taskbar }).catch((err) => {
+      console.warn("set_taskbar_hidden failed", err);
+    });
     if (
       state.settings.city === "当前位置" &&
       Number.isFinite(Number(state.settings.latitude)) &&
@@ -711,6 +769,16 @@
     }
     // 日历模式与极简模式互斥，日历模式优先
     if (state.settings.calendar) state.settings.minimal = false;
+    // 旧版本/外部工具可能写进形状异常的天气数据，直接丢弃，避免启动即只读。
+    if (state.weather) {
+      if (!Array.isArray(state.weather.daily)) {
+        state.weather = null;
+      } else {
+        state.weather.daily = state.weather.daily.filter(
+          (day) => day && typeof day.date === "string"
+        );
+      }
+    }
     state.todos = normalizeTodos(state.todos);
   }
 
@@ -723,6 +791,12 @@
 
   function save() {
     if (loadFailed) return; // 数据文件损坏时保持只读，避免覆盖待恢复的原文件
+    // drain 正在把 AI 待办合并进 data.json；此时用旧 state 整包保存会把它覆盖掉。
+    if (aiPullBusy) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(save, 200);
+      return;
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       // 上一次写盘还没结束：重新排队，绝不能直接丢弃（那会丢掉这期间的用户改动）
@@ -740,7 +814,7 @@
       } catch (err) {
         saveFailures += 1;
         console.warn("save_state failed", err);
-        if (saveFailures >= 3) showSaveError();
+        showSaveError();
         // 写盘失败不能只留在内存里：断网 / 磁盘被占用恢复后必须自动补写，
         // 否则用户这段时间的待办会在重启后全部丢失。
         clearTimeout(saveRetryTimer);
@@ -756,6 +830,16 @@
         saving = false;
       }
     }, 200);
+  }
+
+  async function flushSave() {
+    if (loadFailed) return;
+    // 等 drain 合并完成，避免退出时用旧 state 覆盖刚写入的 AI 待办。
+    const deadline = Date.now() + 3000;
+    while (aiPullBusy && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await invoke("save_state", { state: serializeState() });
   }
 
   function serializeState() {
@@ -836,6 +920,7 @@
   }
 
   function screenBounds() {
+    if (currentMonitorBounds) return currentMonitorBounds;
     const left = Number.isFinite(window.screen.availLeft) ? window.screen.availLeft : 0;
     const top = Number.isFinite(window.screen.availTop) ? window.screen.availTop : 0;
     return {
@@ -843,6 +928,30 @@
       top,
       right: left + window.screen.availWidth,
       bottom: top + window.screen.availHeight,
+    };
+  }
+
+  let currentMonitorBounds = null;
+
+  async function refreshMonitorBounds() {
+    const monitors = await monitorList();
+    if (!monitors.length) return;
+    let rect = null;
+    try {
+      rect = await getWindowRect();
+    } catch (err) {
+      /* ignore */
+    }
+    const picked = rect
+      ? pickMonitor(rect, { width: rect.w, height: rect.h }, monitors)
+      : null;
+    const r = picked || (monitors[0] ? monitorRect(monitors[0]) : null);
+    if (!r) return;
+    currentMonitorBounds = {
+      left: r.x,
+      top: r.y,
+      right: r.x + r.w,
+      bottom: r.y + r.h,
     };
   }
 
@@ -1032,6 +1141,7 @@
 
   async function enterEdgeHide(edge, r, pos, size) {
     if (edgeHide || !win) return;
+    const concealGen = ++edgeConcealGen;
     const sliver = EDGE_SLIVER;
     const shown = { x: pos.x, y: pos.y };
     if (edge === "top" || edge === "bottom") {
@@ -1074,6 +1184,7 @@
     );
     // 等内容淡出/缩小彻底结束，再换上窄条，避免最后一帧闪一下又弹出
     await new Promise((resolve) => setTimeout(resolve, Math.round(EDGE_HIDE_ANIM_MS * 0.12)));
+    if (concealGen !== edgeConcealGen || !edgeHide || edgeHide.revealed) return;
     showEdgePeek(edge);
     resetEdgeTransform();
   }
@@ -1098,6 +1209,7 @@
 
   async function revealEdgeHide() {
     if (!edgeHide || edgeHide.revealed) return;
+    edgeConcealGen += 1; // 让仍在进行的收起收尾失效
     edgeHide.revealed = true;
     edgeShowing = true;
     els.app.classList.add("edge-showing");
@@ -1126,6 +1238,7 @@
 
   async function concealEdgeHide() {
     if (!edgeHide || !edgeHide.revealed) return;
+    const concealGen = ++edgeConcealGen;
     edgeHide.revealed = false;
     clearTimeout(trayHideTimer);
     trayHideTimer = null;
@@ -1134,6 +1247,7 @@
       runEdgeContent(edge, true, EDGE_HIDE_ANIM_MS)
     );
     await new Promise((resolve) => setTimeout(resolve, Math.round(EDGE_HIDE_ANIM_MS * 0.12)));
+    if (concealGen !== edgeConcealGen || !edgeHide || edgeHide.revealed) return;
     showEdgePeek(edge);
     resetEdgeTransform();
   }
@@ -1141,6 +1255,7 @@
   function clearEdgeHide() {
     edgeHide = null;
     edgeShowing = false;
+    edgeConcealGen += 1;
     els.app.classList.remove("edge-showing");
     edgeAnimToken += 1;
     edgeAnimating = null;
@@ -1225,6 +1340,7 @@
 
   async function handleMoveSettled() {
     if (!win || settingsOpen || edgeAnimating) return;
+    await refreshMonitorBounds();
     if (edgeHide) {
       let pos;
       let size;
@@ -1520,8 +1636,19 @@
 
   // 测试钩子：集成用例需要在不抢焦点的情况下触发一次后台重绘（REG-49），
   // 以及直接进入只读态验证告警条与禁用状态（REG-57）。
-  window.__TEST_RENDER_TODOS = renderTodos;
-  window.__TEST_LOAD_ERROR = showLoadError;
+  if (TEST_MODE) {
+    window.__TEST_RENDER_TODOS = renderTodos;
+    window.__TEST_LOAD_ERROR = showLoadError;
+    window.__TEST_NORMALIZE_WEATHER = (weather) => {
+      const prev = state.weather;
+      state.weather = weather;
+      normalizeState();
+      const out = state.weather;
+      state.weather = prev;
+      normalizeState();
+      return out;
+    };
+  }
 
   function buildRow(todo) {
     const row = document.createElement("div");
@@ -1674,12 +1801,42 @@
     commitTodos();
   }
 
+  function showUndo(id, text) {
+    if (!els.undoToast) return;
+    undoTodoId = id;
+    els.undoText.textContent = `已完成「${text}」`;
+    els.undoToast.hidden = false;
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(hideUndo, 6000);
+  }
+
+  function hideUndo() {
+    clearTimeout(undoTimer);
+    undoTimer = null;
+    undoTodoId = null;
+    if (els.undoToast) els.undoToast.hidden = true;
+  }
+
+  function undoDone() {
+    if (!undoTodoId) return;
+    const index = state.todos.findIndex((todo) => todo.id === undoTodoId);
+    if (index >= 0 && state.todos[index].done) {
+      state.todos[index] = applyDone(state.todos[index], false);
+      commitTodos();
+    }
+    hideUndo();
+  }
+
   function toggleDone(id) {
     if (loadFailed) return;
     const index = state.todos.findIndex((todo) => todo.id === id);
-    if (index < 0 || state.todos[index].done) return;
-    state.todos[index] = applyDone(state.todos[index], true);
+    if (index < 0) return;
+    const todo = state.todos[index];
+    const next = !todo.done;
+    state.todos[index] = applyDone(todo, next);
     commitTodos();
+    if (next) showUndo(id, todo.text);
+    else hideUndo();
   }
 
   function togglePin(id) {
@@ -2042,7 +2199,7 @@
       state.weather = await window.WeatherAPI.load(
         url,
         { city: s.city, lat: s.latitude, lon: s.longitude },
-        (target) => invoke("fetch_json", { url: target })
+        (target) => invoke("fetch_json", { url: target, allowLocal: !!custom })
       );
       networkOk = true;
       weatherFailed = 0;
@@ -2111,15 +2268,17 @@
     const span = Math.max(1, max - min);
 
     els.forecast.innerHTML = "";
-    days.forEach((day, index) => {
+    const todayKey = ymd(new Date());
+    const tomorrowKey = ymd(new Date(Date.now() + 86400000));
+    days.forEach((day) => {
       const date = new Date(`${day.date}T12:00:00`);
       const row = document.createElement("div");
       row.className = "fc-row";
 
       const label = document.createElement("span");
       label.className = "fc-day";
-      if (index === 0) label.textContent = "今天";
-      else if (index === 1) label.textContent = "明天";
+      if (day.date === todayKey) label.textContent = "今天";
+      else if (day.date === tomorrowKey) label.textContent = "明天";
       else label.textContent = WEEK[date.getDay()];
 
       const icon = document.createElement("span");
@@ -2309,6 +2468,8 @@
   function hideCalInfo() {
     clearTimeout(cellHoverTimer);
     cellHoverTimer = null;
+    clearTimeout(infoGraceTimer);
+    infoGraceTimer = null;
     cancelInfoHide();
     hoverCell = null;
     infoPinned = false;
@@ -2469,6 +2630,10 @@
     } else if (trigger && cfg.checked !== ymd(now)) {
       ensureHolidays(year, true);
     }
+    // 12/20 顺带预取次年，避免跨年翻页时次年 JSON 尚未发布导致整月空白。
+    if (month === 11 && day === 20) {
+      ensureHolidays(year + 1, true);
+    }
   }
 
   function renderCalendar() {
@@ -2618,7 +2783,6 @@
     settingsOpen = true;
     syncSettingsUi();
     const rect = await getWindowRect();
-    settingsSavedSize = { w: rect.w, h: rect.h };
 
     if (state.settings.calendar) {
       // 日历模式已是整页布局：设置浮在右侧，只在窗口过窄时补足到不遮挡待办
@@ -2653,14 +2817,6 @@
     if (!settingsOpen) return;
     settingsOpen = false;
     els.settingsOverlay.hidden = true;
-    if (settingsSavedSize) {
-      const rect = await getWindowRect();
-      const avail = screenBounds();
-      if (rect.y + settingsSavedSize.h <= avail.bottom) {
-        // keep top-left, shrink back to content size below
-      }
-      settingsSavedSize = null;
-    }
     await scheduleLayout();
     await savePosition();
   }
@@ -2695,7 +2851,7 @@
     } catch (err) {
       console.warn(err);
     }
-    save();
+    await flushSave(); // 系统置顶状态已变，磁盘值立即跟上
   }
 
   // 导出最近 30 天已完成事项：创建时间，完成时间，事项内容
@@ -2746,7 +2902,10 @@
    * 拿到 IP 结果后，若浏览器支持定位且在授权中，再尝试用 GPS 提升精度。
    */
   function locate() {
+    const token = ++locateToken;
     const applyCity = (name) => {
+      // 用户已经开始手动输入时，迟到的 IP 结果不能覆盖。
+      if (token !== locateToken) return;
       state.settings.city = name;
       els.cityInput.value = name;
       if (state.weather) state.weather.city = name;
@@ -2956,10 +3115,6 @@
 
   // 顶部栏：天气胶囊、设置入口
   function bindShellEvents() {
-    els.header.addEventListener("dblclick", (event) => {
-      if (!event.target.closest("button")) return;
-    });
-
     els.weatherPill.addEventListener("click", () => toggleWeather());
     els.settingsBtn.addEventListener("click", () => {
       if (settingsOpen) closeSettings();
@@ -2975,6 +3130,15 @@
         const row = action.closest(".todo-row");
         const id = row?.dataset.id;
         if (!id) return;
+        // 第一下会重建列表，下一行移到同一坐标；若第二下落到不同待办，
+        // 按双击吞掉。同一待办上的连续点击仍放行（例如快速改置顶）。
+        const now = Date.now();
+        if (event.detail > 1 && id !== lastAct.id && now - lastAct.at < 600) {
+          lastAct = { id, at: now };
+          event.stopPropagation();
+          return;
+        }
+        lastAct = { id, at: now };
         const act = action.dataset.act;
         if (act === "done") toggleDone(id);
         else if (act === "pin") togglePin(id);
@@ -2990,6 +3154,8 @@
     });
 
     els.todoList.addEventListener("dblclick", (event) => {
+      // 双击行内按钮不能变成下一行的改名框。
+      if (event.target.closest(".act-btn")) return;
       if (event.target.closest(".edit-input")) return;
       const row = event.target.closest(".todo-row");
       if (!row) return;
@@ -2999,9 +3165,18 @@
 
     els.todoList.addEventListener("scroll", () => closeDuePopover(), { passive: true });
 
+    if (els.undoBtn) els.undoBtn.addEventListener("click", undoDone);
+
     els.addRow.addEventListener("click", (event) => {
       if (event.target.closest(".add-input")) return;
       startAdd();
+    });
+    els.addRow.addEventListener("keydown", (event) => {
+      if (event.target !== els.addRow) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        startAdd();
+      }
     });
 
     els.dueOk.addEventListener("click", () => commitDue());
@@ -3121,6 +3296,17 @@
       { passive: false }
     );
 
+    const startCellHover = (cell) => {
+      hoverCell = cell;
+      const [yy, mm, dd] = (cell.dataset.date || "").split("-").map(Number);
+      if (!yy || !mm || !dd) return;
+      const date = new Date(yy, mm - 1, dd);
+      cellHoverTimer = setTimeout(() => {
+        cellHoverTimer = null;
+        showCalInfo(cell, date);
+      }, 3000);
+    };
+
     // 在日期格上停留 3 秒显示农历 / 天气 / 每日一句；移走后延迟 1.2 秒消失
     els.calGrid.addEventListener("mouseover", (event) => {
       const cell = event.target.closest(".cal-cell");
@@ -3131,15 +3317,21 @@
       if (infoPinned) return;
       cancelInfoHide();
       if (cell === hoverCell) return;
+      // 右缘日期格的弹框会出现在左侧，光标移过去必然穿过相邻格。
+      // 给 300ms 穿行时间：期间不 hide；真正到达弹框会被 mouseenter 取消。
+      if (!els.calInfo.hidden) {
+        clearTimeout(infoGraceTimer);
+        const nextCell = cell;
+        infoGraceTimer = setTimeout(() => {
+          infoGraceTimer = null;
+          if (els.calInfo.hidden) return;
+          hideCalInfo();
+          startCellHover(nextCell);
+        }, 300);
+        return;
+      }
       hideCalInfo();
-      hoverCell = cell;
-      const [yy, mm, dd] = (cell.dataset.date || "").split("-").map(Number);
-      if (!yy || !mm || !dd) return;
-      const date = new Date(yy, mm - 1, dd);
-      cellHoverTimer = setTimeout(() => {
-        cellHoverTimer = null;
-        showCalInfo(cell, date);
-      }, 3000);
+      startCellHover(cell);
     });
 
     els.calGrid.addEventListener("mouseout", (event) => {
@@ -3154,6 +3346,8 @@
       }
       // 单击弹出的弹框已按 INFO_CLICK_HOLD 计时，离开触发格不重置它
       if (infoPinned) return;
+      // 正在给光标穿过相邻格去弹框的时间，不启动关闭计时
+      if (infoGraceTimer) return;
       scheduleHideCalInfo();
     });
 
@@ -3178,7 +3372,11 @@
     });
 
     // 光标停留在弹框上时保持显示，离开后同样延迟消失
-    els.calInfo.addEventListener("mouseenter", () => cancelInfoHide());
+    els.calInfo.addEventListener("mouseenter", () => {
+      clearTimeout(infoGraceTimer);
+      infoGraceTimer = null;
+      cancelInfoHide();
+    });
     els.calInfo.addEventListener("mouseleave", () => scheduleHideCalInfo());
 
     // 日期格自定义拖动：移动超过 4px 才拖动窗口，避免吞掉双击。
@@ -3323,6 +3521,7 @@
     els.exportBtn.addEventListener("click", () => exportRecentDone());
 
     els.autostartSwitch.addEventListener("click", async () => {
+      autostartTouched = true;
       const next = !state.settings.autostart;
       // 先给出视觉反馈，写入注册表在后台完成
       state.settings.autostart = next;
@@ -3331,7 +3530,7 @@
         const applied = await invoke("set_autostart", { enabled: next });
         state.settings.autostart = !!applied;
         setSwitch(els.autostartSwitch, !!applied);
-        save();
+        await flushSave(); // 系统状态已变，磁盘值必须立即跟上
       } catch (err) {
         console.warn("autostart failed", err);
         state.settings.autostart = !next;
@@ -3345,7 +3544,7 @@
         await invoke("set_taskbar_hidden", { enabled: next });
         state.settings.hide_taskbar = next;
         setSwitch(els.taskbarSwitch, next);
-        save();
+        await flushSave();
       } catch (err) {
         console.warn("taskbar toggle failed", err);
         setSwitch(els.taskbarSwitch, state.settings.hide_taskbar);
@@ -3370,7 +3569,10 @@
         els.cityInput.blur();
       }
     });
-    els.cityInput.addEventListener("change", () => changeCity());
+    els.cityInput.addEventListener("change", () => {
+      locateToken += 1; // 用户手动改城市，取消迟到的定位结果
+      changeCity();
+    });
     els.weatherApiInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -3388,10 +3590,10 @@
 
     els.quitBtn.addEventListener("click", async () => {
       try {
-        if (!loadFailed) await invoke("save_state", { state: serializeState() });
-        if (win) await win.close();
+        await flushSave();
       } catch (err) {
         console.warn(err);
+      } finally {
         // 写盘失败也必须能退出，不能把用户困在程序里。
         if (win) await win.close();
       }
@@ -3402,6 +3604,22 @@
   function bindWindowEvents() {
     if (tauri.event) {
       tauri.event.listen("tray-show", handleTrayShow).catch(() => {});
+      tauri.event.listen("tray-quit", async () => {
+        try {
+          await flushSave();
+        } catch (err) {
+          console.warn("flush before quit failed", err);
+        }
+        invoke("quit_app").catch(() => {});
+      }).catch(() => {});
+      tauri.event.listen("window-close-request", async () => {
+        try {
+          await flushSave();
+        } catch (err) {
+          console.warn("flush before close failed", err);
+        }
+        if (win) await win.destroy();
+      }).catch(() => {});
     }
     // 拖动停止后处理靠边吸附 / 边缘隐藏
     if (win && typeof win.onMoved === "function") {
@@ -3494,6 +3712,14 @@
       },
       true
     );
+
+    document.addEventListener("keydown", (event) => {
+      const sw = event.target.closest && event.target.closest(".switch");
+      if (sw && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        sw.click();
+      }
+    });
 
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;

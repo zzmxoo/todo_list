@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
@@ -31,9 +31,10 @@ pub fn enqueue(dir: &Path, todo: &AiTodo) -> Result<PathBuf, String> {
     let dst = inbox.join(format!("{}.json", todo.id));
     let text = serde_json::to_string_pretty(todo).map_err(|e| e.to_string())?;
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    if fs::rename(&tmp, &dst).is_err() {
-        fs::copy(&tmp, &dst).map_err(|e| e.to_string())?;
+    // 原子替换；失败直接报错，绝不退化 copy（copy 与 drain 并发会写出半截文件）。
+    if !super::atomic_replace(&tmp, &dst) {
         let _ = fs::remove_file(&tmp);
+        return Err(format!("写入收件箱失败：{}", dst.display()));
     }
     Ok(dst)
 }
@@ -57,25 +58,41 @@ fn inbox_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
-fn read_pending(path: &Path) -> Option<AiTodo> {
-    let text = fs::read_to_string(path).ok()?;
-    serde_json::from_str::<AiTodo>(&text).ok()
+enum PendingRead {
+    Todo(AiTodo),
+    Invalid,
+    Deferred,
+}
+
+fn read_pending(path: &Path) -> PendingRead {
+    let Ok(bytes) = fs::read(path) else {
+        // 文件被短暂占用/杀软扫描：保留文件，下次重试，不能当坏 JSON 隔离。
+        return PendingRead::Deferred;
+    };
+    match serde_json::from_slice::<AiTodo>(&bytes) {
+        Ok(todo) => PendingRead::Todo(todo),
+        Err(_) => PendingRead::Invalid,
+    }
 }
 
 pub fn pending(dir: &Path) -> Vec<AiTodo> {
     inbox_files(dir)
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|path| read_pending(&path))
+        .filter_map(|path| match read_pending(&path) {
+            PendingRead::Todo(todo) => Some(todo),
+            _ => None,
+        })
         .collect()
 }
 
-pub fn read_todos(dir: &Path) -> Vec<Value> {
+#[cfg(test)]
+fn read_todos(dir: &Path) -> Vec<Value> {
     let path = dir.join("data.json");
-    let Ok(text) = fs::read_to_string(path) else {
+    let Ok(bytes) = fs::read(path) else {
         return Vec::new();
     };
-    let Ok(root) = serde_json::from_str::<Value>(&text) else {
+    let Ok(root) = serde_json::from_slice::<Value>(&bytes) else {
         return Vec::new();
     };
     root.get("todos")
@@ -106,6 +123,11 @@ fn quarantine_data_file(path: &Path) -> PathBuf {
     if fs::rename(path, &dst).is_err() {
         return path.to_path_buf();
     }
+    // rename 不修改 mtime；24 小时窗口必须从「隔离时刻」起算，
+    // 否则隔天重启或旧文件首次隔离时会立刻过期，被当成全新安装。
+    if let Ok(file) = fs::OpenOptions::new().write(true).open(&dst) {
+        let _ = file.set_modified(SystemTime::now());
+    }
     dst
 }
 
@@ -123,6 +145,17 @@ fn corrupt_error(path: &Path, detail: String) -> String {
 
 /// 同目录下是否存在损坏备份。`data.json` 被隔离后路径不存在，
 /// 但这不等于首次安装：只要还有 `.corrupt-*`，就必须继续报错。
+/// 只有 24 小时内的损坏备份才阻止启动。半年前恢复后遗留的 .corrupt-*
+/// 不应让文件缺失（OneDrive 冲突、误移）变成永久只读。
+fn is_recent_backup(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.elapsed().ok())
+        .map(|age| age < Duration::from_secs(24 * 60 * 60))
+        .unwrap_or(true)
+}
+
 fn find_corrupt_backup(path: &Path) -> Option<PathBuf> {
     let dir = path.parent()?;
     let prefix = format!(
@@ -139,6 +172,7 @@ fn find_corrupt_backup(path: &Path) -> Option<PathBuf> {
                 .and_then(|name| name.to_str())
                 .map(|name| name.starts_with(&prefix))
                 .unwrap_or(false)
+                && is_recent_backup(item)
         })
         .collect();
     found.sort();
@@ -165,8 +199,10 @@ pub fn read_state_root(path: &Path) -> Result<Value, String> {
         }
         return Ok(json!({}));
     }
-    let text = fs::read_to_string(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
-    let root = match serde_json::from_str::<Value>(&text) {
+    // 用 bytes 解析：非 UTF-8 也属于内容损坏，应走隔离与恢复指引，
+    // 而不是变成一个没有备份、没有提示的 IO 错误。
+    let bytes = fs::read(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
+    let root = match serde_json::from_slice::<Value>(&bytes) {
         Ok(value) => value,
         Err(err) => return Err(corrupt_error(path, err.to_string())),
     };
@@ -185,8 +221,8 @@ pub fn ensure_overwritable(path: &Path) -> Result<(), String> {
         }
         return Ok(());
     }
-    let text = fs::read_to_string(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
-    match serde_json::from_str::<Value>(&text) {
+    let bytes = fs::read(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
+    match serde_json::from_slice::<Value>(&bytes) {
         Ok(value) if value.is_object() => Ok(()),
         Ok(_) => Err(corrupt_error(path, "根节点不是对象".into())),
         Err(err) => Err(corrupt_error(path, err.to_string())),
@@ -205,11 +241,13 @@ pub fn drain(dir: &Path) -> Result<Vec<AiTodo>, String> {
     let mut used = Vec::new();
     for path in files {
         match read_pending(&path) {
-            Some(todo) if !todo.text.trim().is_empty() => {
+            PendingRead::Todo(todo) if !todo.text.trim().is_empty() => {
                 entries.push(todo);
                 used.push(path);
             }
-            _ => quarantine(&path),
+            PendingRead::Todo(_) | PendingRead::Invalid => quarantine(&path),
+            // IO 错误保留文件，下次 drain 再试。
+            PendingRead::Deferred => {}
         }
     }
     if entries.is_empty() {
@@ -324,6 +362,13 @@ mod tests {
             .collect();
         assert_eq!(saved.len(), 1, "corrupt data.json should be kept");
         assert_eq!(fs::read_to_string(&saved[0]).unwrap(), original);
+        let age = fs::metadata(&saved[0])
+            .unwrap()
+            .modified()
+            .unwrap()
+            .elapsed()
+            .unwrap();
+        assert!(age < Duration::from_secs(60), "quarantine mtime must be now");
         assert!(!data_path.exists(), "corrupt data.json must not stay in place");
         assert!(
             dir.join("ai-inbox").join("ai-4.json").exists(),
@@ -372,6 +417,34 @@ mod tests {
         assert!(!data_path.exists());
 
         fs::write(&data_path, "{\"todos\":[]}").unwrap();
+        assert!(ensure_overwritable(&data_path).is_ok());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stale_corrupt_backup_does_not_block_new_install() {
+        let dir = test_dir("stale-backup");
+        let data_path = dir.join("data.json");
+        fs::write(&data_path, "{bad").unwrap();
+        read_state_root(&data_path).unwrap_err(); // 隔离出 .corrupt-*
+
+        let corrupt = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|item| item.path()))
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with("data.json.corrupt-"))
+                    .unwrap_or(false)
+            })
+            .expect("quarantined backup");
+        let old = SystemTime::now() - Duration::from_secs(25 * 60 * 60);
+        let file = fs::OpenOptions::new().write(true).open(&corrupt).unwrap();
+        file.set_modified(old).unwrap();
+        drop(file);
+
+        // 过期备份不再阻止启动，也不会让 ensure_overwritable 拒绝写入。
+        assert!(read_state_root(&data_path).is_ok());
         assert!(ensure_overwritable(&data_path).is_ok());
         let _ = fs::remove_dir_all(dir);
     }

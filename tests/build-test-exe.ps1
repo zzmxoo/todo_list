@@ -24,6 +24,8 @@ $win = $conf.app.windows[0]
 $win | Add-Member -NotePropertyName additionalBrowserArgs -NotePropertyValue (
   '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=' + $Port
 ) -Force
+# 测试窗口带 ?test=1，前端据此才挂载 __TEST_* 钩子；生产窗口不受影响。
+$win | Add-Member -NotePropertyName url -NotePropertyValue 'index.html?test=1' -Force
 
 $override = @{ app = @{ windows = @($win) } } | ConvertTo-Json -Depth 12 -Compress
 
@@ -31,10 +33,26 @@ $override = @{ app = @{ windows = @($win) } } | ConvertTo-Json -Depth 12 -Compre
 $confTime = (Get-Item $confPath).LastWriteTime
 $uiTime = (Get-ChildItem (Join-Path $root 'ui') -Recurse -File |
            Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
-$srcTime = (Get-Item (Join-Path $crateDir 'src\main.rs')).LastWriteTime
-$newer = @($confTime, $uiTime, $srcTime) | Sort-Object -Descending | Select-Object -First 1
+$srcTime = (Get-ChildItem (Join-Path $crateDir 'src') -Recurse -File |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
+$cargoTime = (Get-Item (Join-Path $crateDir 'Cargo.toml')).LastWriteTime
+$buildTime = if (Test-Path (Join-Path $crateDir 'build.rs')) { (Get-Item (Join-Path $crateDir 'build.rs')).LastWriteTime } else { $null }
+$lockTime = if (Test-Path (Join-Path $crateDir 'Cargo.lock')) { (Get-Item (Join-Path $crateDir 'Cargo.lock')).LastWriteTime } else { $null }
+$capDir = Join-Path $crateDir 'capabilities'
+$capTime = if (Test-Path $capDir) { (Get-ChildItem $capDir -Recurse -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime } else { $null }
+$newer = @($confTime, $uiTime, $srcTime, $cargoTime, $buildTime, $lockTime, $capTime) |
+  Where-Object { $_ } |
+  Sort-Object -Descending | Select-Object -First 1
+$stampPath = Join-Path $targetDir 'build-stamp.json'
+$stampOk = $false
+if (Test-Path $stampPath) {
+  try {
+    $stamp = Get-Content $stampPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $stampOk = ([int]$stamp.port -eq $Port)
+  } catch { $stampOk = $false }
+}
 
-if (-not $Force -and (Test-Path $exe) -and (Get-Item $exe).LastWriteTime -ge $newer) {
+if (-not $Force -and (Test-Path $exe) -and $stampOk -and (Get-Item $exe).LastWriteTime -ge $newer) {
   Write-Host "test exe up-to-date: $exe"
   return $exe
 }
@@ -51,7 +69,7 @@ try {
   Push-Location $crateDir
   try {
     # cargo 的进度信息走 stderr，PowerShell 会当成错误；用 cmd 包装并统一重定向
-    $out = & cmd /c "cargo build --release 2>&1"
+    $out = & cmd /c "cargo build --release --features test-data-dir 2>&1"
     $code = $LASTEXITCODE
   } finally {
     Pop-Location
@@ -66,6 +84,11 @@ if ($code -ne 0) {
   throw "cargo build failed (exit $code)"
 }
 if (-not (Test-Path $exe)) { throw "build succeeded but exe not found: $exe" }
+
+# 记录端口与构建时间；端口变了必须重建，不能复用带旧调试端口的缓存。
+@{ port = $Port; built = (Get-Date).ToString('o') } |
+  ConvertTo-Json -Compress |
+  Set-Content -LiteralPath $stampPath -Encoding UTF8
 
 Write-Host "ok: $exe"
 return $exe

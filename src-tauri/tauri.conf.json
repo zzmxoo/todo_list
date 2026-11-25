@@ -33,7 +33,10 @@
       "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/**", "$APPLOCALDATA/**"]
+        "scope": [
+          "$APPDATA/com.desktoptodo.widget/**",
+          "$APPLOCALDATA/com.desktoptodo.widget/**"
+        ]
       }
     }
   },

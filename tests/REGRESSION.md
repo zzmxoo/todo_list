@@ -9,7 +9,7 @@
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-一条命令会：跑备份守卫自测 → 构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 46 条 UI 集成回归 + 1 条损坏数据端到端回归 → 恢复数据并重新启动发布版。
+一条命令会：跑备份守卫自测 → 构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 49 条 UI 集成回归 + 1 条损坏数据端到端回归 → 恢复数据并重新启动发布版。
 只想跑 UI 层可加 `-SkipUnits -SkipRust`；只跳过 Rust 可加 `-SkipRust`。集成脚本本身是 `tests/integration-page.js`。分层原则与“该写单元还是集成”的判断见 [`tests/TESTING.md`](TESTING.md)。
 
 ## 维护规则（每次修复 bug 必须做）
@@ -71,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-37 | 节日底色整体偏暖、明度充足，不用冷色与阴暗色（清明节保留清冷竹青） | 本次修复 | 见下方单元用例 |
 | REG-46 | data.json 损坏时不能静默清空：原文件改名保留为 `data.json.corrupt-*`；重启时检测到该备份仍报错，不当作全新安装；本次不写盘，前端显示告警并停止保存 | 本次修复 | Rust `ai::inbox::tests`（drain 二次调用 / 重启读取 / save 守卫）；`regression.ps1` 端到端用例；前端 `loadFailed` 分支 |
 | REG-47 | 回归脚本不能用测试数据覆盖用户数据：残留备份（含另一套脚本的 `.itest`）、空文件、损坏 JSON 一律中止；只恢复本次创建的备份 | 本次修复 | `tests/test-regress-lib.ps1`（6 条） |
-| REG-48 | 测试不能假绿：`skip` 单独统计不计 PASS；集成用例数少于 44 判失败；REG-27 右侧断言失败必须冒泡 | 本次修复 | `integration-page.js` 的 `t()` / REG-27；`regression.ps1` / `integration.ps1` 的 `Report-Cases` |
+| REG-48 | 测试不能假绿：`skip` 单独统计不计 PASS；集成用例数少于 49 判失败；REG-27 右侧断言失败必须冒泡 | 本次修复 | `integration-page.js` 的 `t()` / REG-27；`regression.ps1` / `integration.ps1` 的 `Report-Cases` |
 | REG-49 | 后台重绘（AI 收件箱轮询）不能吞掉行内编辑内容，也不能把列表滚动位置清零 | 本次修复 | 后台重绘保留行内编辑与滚动位置 |
 | REG-50 | 开机启动 Run 值必须带引号（路径含空格也能启动）；reg 使用 System32 绝对路径并有超时 | 本次修复 | Rust `autostart_add_args_quote_exe_path`、`reg_exe_is_absolute_when_system_root_exists`；超时人工核对 |
 | REG-51 | 单实例运行；`data.json` 临时文件名带 PID，双开不共用临时文件 | 本次修复 | 人工：二次启动直接退出；代码审查临时文件名 |
@@ -83,8 +83,25 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-57 | 只读告警提供「打开数据目录 / 重试」；提示改名而不是删除；设置面板 inert、待办操作禁用；告警条高度计入窗口布局 | 本次修复 | 只读告警提供解除入口，并禁用设置与待办操作 |
 | REG-58 | 保存连续失败时顶部明确提示，恢复后自动收起 | 本次修复 | REG-36 + 人工；`save()` 连续 3 次失败提示 |
 | REG-59 | REG-46 用临时数据目录 + 预置收件箱条目，不碰用户真实数据；旧实现会在 drain 时写出空壳 | 本次修复 | `regression.ps1` 的 REG-46（`DESKTOP_TODO_DATA_DIR`） |
-| REG-60 | 两套回归脚本互斥；集成用例下限 46；守卫自测至少 6 条 | 本次修复 | `regression.ps1` / `integration.ps1` 的命名互斥量与计数断言 |
+| REG-60 | 两套回归脚本互斥；集成用例下限 49；守卫自测至少 6 条 | 本次修复 | `regression.ps1` / `integration.ps1` 的命名互斥量与计数断言 |
 | REG-61 | MSIX 签名口令优先读环境变量，不再要求写进命令行 | 本次修复 | `build-msix.ps1`（人工核对调用方式） |
+| REG-62 | 保存失败态的「重试」不能再整页 reload，必须走 `save()`，不能丢内存里未落盘的改动 | 本次修复 | 人工：连续失败后点重试观察保存；代码审查 |
+| REG-63 | 损坏恢复文案给出可走通的路径（修好 JSON 或把 `.corrupt-*` 全部移出目录），不再要求改回坏文件 | 本次修复 | REG-57 文案检查 + 人工走一遍 |
+| REG-64 | REG-27 自建待办 fixture、REG-57 try/finally 复位、首次安装回归结束删除测试新建的 data.json | 本次修复 | REG-27 / REG-57；`regression.ps1` / `integration.ps1` 的 `$dataExisted` 清理 |
+| REG-65 | `fetch_json` 流式限制 2MB，并拒绝 localhost / 回环 / 私网字面地址 | 本次修复 | Rust `blocks_local_and_private_fetch_hosts` |
+| REG-66 | `DESKTOP_TODO_DATA_DIR` 只在测试构建（`test-data-dir` feature）启用；`explorer` 走系统目录；`run.ps1` 同样加互斥锁与条数下限 | 本次修复 | `Cargo.toml` / `build-test-exe.ps1` / `run.ps1` |
+| REG-67 | 双击行内按钮只执行一次，不能连带删掉/完成下一条 | 本次修复 | 双击行内按钮只作用一次 |
+| REG-68 | 误点完成后可从撤销提示恢复 | 本次修复 | 误点完成后可通过撤销恢复 |
+| REG-69 | 磁盘里的天气数据形状异常时丢弃，不能启动即只读 | 本次修复 | 天气数据形状异常时丢弃 |
+| REG-70 | 原子写不再用 `fs::copy` 回退；非 UTF-8 内容按损坏隔离；超过 24 小时的 `.corrupt-*` 不再永久锁死 | 本次修复 | Rust `stale_corrupt_backup...` 等；人工核对 `write_json_atomic` |
+| REG-71 | 回归前快照 `HKCU\...\Run\DesktopTodo`，结束后原样回填（含测试 exe 路径场景）；Rust/JS 单测都有条数下限 | 本次修复 | `regression.ps1` / `integration.ps1` 的注册表快照与 `MIN_*` 断言 |
+| REG-72 | MSIX 在 draft Release 生成后打包；`fetch_json` 拒绝重定向与 IPv6 内网；测试 exe 按 src 全目录与端口失效缓存 | 本次修复 | workflow 顺序、Rust 地址过滤用例、`build-stamp.json` |
+| REG-73 | `todos` 字段存在但不是数组时停止写入，不能静默当空清单覆盖 | 本次修复 | `core.validateLoadedState` 单元用例 |
+| REG-74 | 损坏隔离的 24 小时窗口从隔离时刻起算，旧文件首次隔离不会立刻过期 | 本次修复 | Rust `drain_keeps_corrupt...` 的 mtime 断言 |
+| REG-75 | 注册表快照未成功时绝不回填/删除用户自启；CI 与守卫自测都有条数下限 | 本次修复 | `$autostartSnapshotTaken`；`release.yml` / `test-regress-lib.ps1` |
+| REG-76 | 自定义天气接口允许本机/内网地址，其余 `fetch_json` 调用仍拦截；上述例外有隐私文档说明 | 本次修复 | Rust 地址过滤用例 + 人工核对 `allowLocal` 调用点 |
+| REG-77 | 双击行内按钮不会让下一条进入编辑；同一坐标连续点不同待办不会被误吞 | 本次修复 | REG-67 + 人工快速连点 |
+| REG-78 | 窗口关闭（Alt+F4）先 flush 再销毁；系统开关（置顶/自启/任务栏）成功后立即落盘 | 本次修复 | 人工关闭窗口；代码审查 `window-close-request` / `flushSave` |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

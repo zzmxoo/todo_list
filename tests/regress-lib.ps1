@@ -7,6 +7,12 @@
 #    文件截断，把半截 JSON 备份下来等于毁掉唯一的恢复副本。
 # 3. 恢复时同样校验备份本身，坏备份宁可保留现场也不覆盖 data.json。
 
+# 用例数量下限集中定义，避免脚本与文档各写一份。
+$MIN_REGRESS_LIB_CASES = 6
+$MIN_INTEGRATION_CASES = 49
+$MIN_UNIT_CASES = 49
+$MIN_RUST_CASES = 42
+
 function Assert-DataFileReadable([string]$path) {
   if (-not (Test-Path -LiteralPath $path)) { return $false }
   $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8
