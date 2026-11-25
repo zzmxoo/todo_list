@@ -342,6 +342,16 @@ mod tests {
             take_value(&eq, 0, "--install-mcp").map(|(value, _)| value),
             Some("workbuddy".to_string())
         );
+        let exe = vec!["--exe=C:\\Apps\\desktop-todo.exe".to_string()];
+        assert_eq!(
+            take_value(&exe, 0, "--exe").map(|(value, _)| value),
+            Some(r"C:\Apps\desktop-todo.exe".to_string())
+        );
+        let spaced = vec!["--exe".to_string(), r"C:\Apps\desktop-todo.exe".to_string()];
+        assert_eq!(
+            take_value(&spaced, 0, "--exe").map(|(value, _)| value),
+            Some(r"C:\Apps\desktop-todo.exe".to_string())
+        );
     }
 
     #[test]

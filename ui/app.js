@@ -312,6 +312,23 @@
     return { text, kind };
   }
 
+  // 预报接口返回的是城市所在时区的日期；日历按本地日期显示。
+  // 用「第 i 天」映射到本地今天 + i，避免跨时区时键对不上、日历格没有天气。
+  function localWeatherDayKey(index) {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() + index);
+    return ymd(d);
+  }
+
+  function weatherForLocalDay(key) {
+    const daily = state.weather?.daily || [];
+    for (let i = 0; i < daily.length; i += 1) {
+      if (localWeatherDayKey(i) === key) return daily[i];
+    }
+    return null;
+  }
+
   function toFileUrl(path) {
     if (!path) return "";
     try {
@@ -2559,7 +2576,7 @@
       els.ciTerm.hidden = true;
     }
 
-    const dayWeather = (state.weather?.daily || []).find((item) => item.date === key);
+    const dayWeather = weatherForLocalDay(key);
     if (dayWeather) {
       const info = wmoInfo(dayWeather.code);
       els.ciWIcon.innerHTML = wxIcon(info.kind, 13);
@@ -2669,9 +2686,9 @@
     const events = buildEvents(state.todos);
 
     const weatherByDay = new Map();
-    for (const day of state.weather?.daily || []) {
-      weatherByDay.set(day.date, day);
-    }
+    (state.weather?.daily || []).forEach((day, index) => {
+      weatherByDay.set(localWeatherDayKey(index), day);
+    });
 
     const holidayByDay = buildHolidayMap(state.settings.holidays);
     const model = buildMonthWeeks(y, m, events);

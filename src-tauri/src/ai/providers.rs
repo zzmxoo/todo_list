@@ -555,4 +555,38 @@ mod tests {
         assert!(parse_duration("1:60").is_err());
         assert!(parse_duration("0:00").is_err());
     }
+
+    #[test]
+    fn duration_accepts_documented_forms() {
+        assert_eq!(parse_duration("90").unwrap(), 90);
+        assert_eq!(parse_duration("1.5h").unwrap(), 90);
+        assert_eq!(parse_duration("1小时30分钟").unwrap(), 90);
+        assert_eq!(parse_duration("1:30").unwrap(), 90);
+        assert_eq!(parse_duration("60分钟").unwrap(), 60);
+    }
+
+    #[test]
+    fn normalize_due_accepts_seconds_and_timezone() {
+        assert_eq!(
+            normalize_due("2026-11-25 08:30:45").unwrap(),
+            "2026-11-25T08:30:45"
+        );
+        assert_eq!(
+            normalize_due("2026-11-25T08:30:45+08:00").unwrap(),
+            "2026-11-25T08:30:45+08:00"
+        );
+        assert!(normalize_due("2026-02-30 08:30").is_ok()); // shape 校验，不负责日历合法性
+    }
+
+    #[test]
+    fn add_minutes_crosses_month_year_and_leap_day() {
+        assert_eq!(
+            add_minutes("2024-02-28T23:30:00", 60).unwrap(),
+            "2024-02-29T00:30:00"
+        );
+        assert_eq!(
+            add_minutes("2026-12-31T23:00:00", 120).unwrap(),
+            "2027-01-01T01:00:00"
+        );
+    }
 }

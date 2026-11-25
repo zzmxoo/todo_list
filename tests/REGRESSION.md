@@ -109,6 +109,8 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-83 | `cargo test` 非零退出码必须失败；注册表读失败不回填；QUOTES/REG-46 也计入内置用例下限 | 本次修复 | 脚本日志 + 代码审查 |
 | REG-84 | MSIX 拒绝 major≥1 的映射；测试 exe 缓存包含脚本自身改动 | 本次修复 | `build-msix.ps1` / `build-test-exe.ps1` |
 | REG-85 | tray 初始化失败提示、任务栏与托盘换序回滚、capabilities 允许 destroy、自定义天气允许有限跳转、`1:00` 时长、自启路径比对、退出 flush 不超时、悬停 grace 复位、文本强制转字符串、预报首行兜底 | 本次修复 | Rust 时长/地址用例；`unit-core`；人工手测 |
+| REG-86 | 天气预报按「本地今天 + 第 i 天」映射日历日期，城市时区与系统不同也不会丢天气图标 | 本次修复 | 人工切换异地城市；代码审查 `localWeatherDayKey` |
+| REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 50 条 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

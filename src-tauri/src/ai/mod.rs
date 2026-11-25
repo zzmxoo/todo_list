@@ -209,4 +209,11 @@ mod tests {
         assert_eq!(&text[10..11], "T");
         assert!(text.ends_with('Z'));
     }
+
+    #[test]
+    fn civil_from_days_handles_epoch_and_leap_day() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(59), (1970, 3, 1));
+        assert_eq!(civil_from_days(19_782), (2024, 2, 29));
+    }
 }

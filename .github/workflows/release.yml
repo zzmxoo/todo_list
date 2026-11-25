@@ -61,8 +61,8 @@ jobs:
             Write-Host "::error::cargo test exit $code"
             exit 1
           }
-          if ($n -lt 42) {
-            Write-Host "::error::Rust 单测只有 $n 条，expected at least 42"
+          if ($n -lt 50) {
+            Write-Host "::error::Rust 单测只有 $n 条，expected at least 50"
             exit 1
           }
 

@@ -395,4 +395,44 @@ mod tests {
         assert!(text.contains("添加失败"), "unexpected: {text}");
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn add_todos_rejects_more_than_fifty() {
+        let dir = test_dir("mcp-cap");
+        let items: Vec<Value> = (0..51).map(|i| json!({"text": format!("t{i}")})).collect();
+        let response = handle(
+            &json!({
+                "jsonrpc":"2.0","id":6,"method":"tools/call",
+                "params": {"name":"add_todos","arguments": {"todos": items}}
+            }),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("50"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn list_todos_dedupes_data_json_and_inbox() {
+        let dir = test_dir("mcp-dedupe");
+        let todo = normalize("generic", &json!({"text": "重复条目"})).unwrap();
+        enqueue(&dir, &todo).unwrap();
+        let root = json!({
+            "todos": [{ "id": todo.id, "text": todo.text, "done": false }]
+        });
+        crate::ai::write_json_atomic(&dir.join("data.json"), &root).unwrap();
+        let response = handle(
+            &json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"list_todos","arguments":{}}}),
+            &dir,
+        )
+        .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["count"], 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

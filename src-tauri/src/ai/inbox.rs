@@ -450,6 +450,27 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_rejects_path_like_ids() {
+        let dir = test_dir("bad-id");
+        for bad in ["../x", "a/b", "a\\b", "a:b", ".."] {
+            let mut item = todo("ok", "x");
+            item.id = bad.into();
+            assert!(enqueue(&dir, &item).is_err(), "id should be rejected: {bad}");
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inbox_files_caps_at_two_hundred() {
+        let dir = test_dir("cap");
+        for i in 0..205 {
+            enqueue(&dir, &todo(&format!("cap-{i:03}"), "x")).unwrap();
+        }
+        assert_eq!(pending(&dir).len(), 200);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn normalize_then_enqueue_keeps_provider_metadata() {
         let dir = test_dir("meta");
         let todo = normalize(
