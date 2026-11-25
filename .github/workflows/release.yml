@@ -52,10 +52,15 @@ jobs:
         working-directory: src-tauri
         run: |
           $out = cargo test --release 2>&1
+          $code = $LASTEXITCODE
           $out | Write-Host
           $text = $out -join "`n"
           $matches = [regex]::Matches($text, 'test result: [^.]+\. (\d+) passed')
           $n = ($matches | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Sum).Sum
+          if ($code -ne 0) {
+            Write-Host "::error::cargo test exit $code"
+            exit 1
+          }
           if ($n -lt 42) {
             Write-Host "::error::Rust 单测只有 $n 条，expected at least 42"
             exit 1

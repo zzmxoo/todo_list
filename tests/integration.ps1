@@ -35,14 +35,26 @@ $dataExisted = $null
 $autostartExisted = $false
 $autostartValue = $null
 $autostartSnapshotTaken = $false
+$appWasRunning = $false
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 try {
   # 守卫、构建、备份都放在 try 内：任何一步抛错，finally 仍会重启发布版。
+  $appWasRunning = [bool](Get-Process -Name desktop-todo -ErrorAction SilentlyContinue)
   Stop-App
-  $autostartProp = Get-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
-  $autostartExisted = $null -ne $autostartProp
-  $autostartValue = if ($autostartExisted) { $autostartProp.DesktopTodo } else { $null }
-  $autostartSnapshotTaken = $true
+  try {
+    $autostartProp = Get-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction Stop
+    $autostartExisted = $true
+    $autostartValue = $autostartProp.DesktopTodo
+    $autostartSnapshotTaken = $true
+  } catch {
+    if ($_.CategoryInfo.Category -eq 'ObjectNotFound') {
+      $autostartExisted = $false
+      $autostartSnapshotTaken = $true
+    } else {
+      $autostartSnapshotTaken = $false
+      Write-Warning "读取自启注册表失败，本次不回填：$($_.Exception.Message)"
+    }
+  }
   $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
 
@@ -101,7 +113,13 @@ try {
   }
   if ($failed -gt 0) { exit 1 }
 } finally {
-  Stop-App
+  $stillRunning = $false
+  try {
+    Stop-App
+  } catch {
+    $stillRunning = $true
+    Write-Warning "停止进程失败：$($_.Exception.Message)；恢复后可能被运行中的实例覆盖"
+  }
   # 只恢复本次实际创建的备份；备份守卫失败时绝不碰用户数据。
   if ($backupCreated) {
     try {
@@ -127,19 +145,23 @@ try {
       Write-Warning "恢复开机启动注册表失败：$($_.Exception.Message)"
     }
   }
-  $inbox = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
-  if (Test-Path $inbox) {
+  $inboxRoots = @(
+    (Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'),
+    (Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox')
+  )
+  foreach ($inbox in $inboxRoots) {
+    if (-not (Test-Path $inbox)) { continue }
     Get-ChildItem $inbox -Filter '*.json' | ForEach-Object {
       try {
-        if ((Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).text -eq 'ITEST-AI-INSERT') {
+        if ((Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).text -match '^ITEST-(AI-INSERT|CORRUPT-PROBE)$') {
           Remove-Item $_.FullName -Force
         }
       } catch { }
     }
   }
-  # 恢复常驻程序（用发布版 exe，不是测试版）
+  # 只有测试前本来就在运行、且进程已停干净时才重启发布版
   $prodExe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
-  if (Test-Path $prodExe) { Start-Process $prodExe }
+  if ($appWasRunning -and -not $stillRunning -and (Test-Path $prodExe)) { Start-Process $prodExe }
   try { $regressionMutex.ReleaseMutex() } catch { }
   $regressionMutex.Dispose()
   if ($restoreFailed) { throw "恢复用户数据失败，备份保留在 $backup" }

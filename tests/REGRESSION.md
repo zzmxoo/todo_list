@@ -9,7 +9,7 @@
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-一条命令会：跑备份守卫自测 → 构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 备份 `data.json` → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 49 条 UI 集成回归 + 1 条损坏数据端到端回归 → 恢复数据并重新启动发布版。
+一条命令会：跑备份守卫自测 → 停止常驻程序 → 快照用户注册表自启 → 备份 `data.json` → 构建带 CDP 端口的测试版（`src-tauri/target-test/`，不污染发布版）→ 跑 Rust 纯函数单测 → 启动测试版 → 跑领域/核心单元测试 → 校验名言库数据 → 跑 49 条 UI 集成回归 + 1 条损坏数据端到端回归 → 恢复数据和注册表，并按测试前状态重启发布版。
 只想跑 UI 层可加 `-SkipUnits -SkipRust`；只跳过 Rust 可加 `-SkipRust`。集成脚本本身是 `tests/integration-page.js`。分层原则与“该写单元还是集成”的判断见 [`tests/TESTING.md`](TESTING.md)。
 
 ## 维护规则（每次修复 bug 必须做）
@@ -102,6 +102,13 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-76 | 自定义天气接口允许本机/内网地址，其余 `fetch_json` 调用仍拦截；上述例外有隐私文档说明 | 本次修复 | Rust 地址过滤用例 + 人工核对 `allowLocal` 调用点 |
 | REG-77 | 双击行内按钮不会让下一条进入编辑；同一坐标连续点不同待办不会被误吞 | 本次修复 | REG-67 + 人工快速连点 |
 | REG-78 | 窗口关闭（Alt+F4）先 flush 再销毁；系统开关（置顶/自启/任务栏）成功后立即落盘 | 本次修复 | 人工关闭窗口；代码审查 `window-close-request` / `flushSave` |
+| REG-79 | `finally` 里的 `Stop-App` 失败不能跳过数据/注册表恢复；只有测试前在运行才重启发布版 | 本次修复 | `regression.ps1` / `integration.ps1` 的 `$stillRunning` / `$appWasRunning` |
+| REG-80 | `wmoInfo` 返回对象后六个调用点取 `.kind`/`.text`，天气图标与文案不再恒为多云/undefined | 本次修复 | 人工查看天气卡；代码审查 |
+| REG-81 | 多屏边界换算为逻辑像素；单屏优先用 `screen.avail*` 工作区 | 本次修复 | REG-24 + 125% 缩放手测 |
+| REG-82 | 生产收件箱改到 `%USERPROFILE%\.desktoptodo\ai-inbox`，避免 MSIX AppData 虚拟化劈成两个目录；旧收件箱自动迁移 | 本次修复 | REG-45；商店版真机 `--add` 验证 |
+| REG-83 | `cargo test` 非零退出码必须失败；注册表读失败不回填；QUOTES/REG-46 也计入内置用例下限 | 本次修复 | 脚本日志 + 代码审查 |
+| REG-84 | MSIX 拒绝 major≥1 的映射；测试 exe 缓存包含脚本自身改动 | 本次修复 | `build-msix.ps1` / `build-test-exe.ps1` |
+| REG-85 | tray 初始化失败提示、任务栏与托盘换序回滚、capabilities 允许 destroy、自定义天气允许有限跳转、`1:00` 时长、自启路径比对、退出 flush 不超时、悬停 grace 复位、文本强制转字符串、预报首行兜底 | 本次修复 | Rust 时长/地址用例；`unit-core`；人工手测 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

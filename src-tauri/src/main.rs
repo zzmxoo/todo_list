@@ -219,6 +219,23 @@ async fn fetch_json(
     if !allow_local && is_blocked_host(&parsed) {
         return Err("不允许访问本机或内网地址".into());
     }
+    let redirect = if allow_local {
+        // 用户自填的本机/内网接口允许有限跳转（常见于 http→https 或反向代理）。
+        reqwest::redirect::Policy::limited(5)
+    } else {
+        // 公共地址不跟随重定向：否则 302 到 127.0.0.1 可绕过首跳校验。
+        reqwest::redirect::Policy::none()
+    };
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .redirect(redirect)
+        // OSM Nominatim 使用政策要求可识别的 UA；版本号取 Cargo，避免发版后过期
+        .user_agent(concat!(
+            "desktop-todo/",
+            env!("CARGO_PKG_VERSION"),
+            " (https://github.com/zzmxoo/todo_list)"
+        ));
+    // 公共域名：预检通过后把地址钉进 client，避免 reqwest 二次解析造成 DNS 重绑定。
     if !allow_local
         && parsed
             .host_str()
@@ -228,24 +245,19 @@ async fn fetch_json(
         if let Some(host) = parsed.host_str() {
             let port = parsed.port_or_known_default().unwrap_or(443);
             if let Ok(addrs) = tokio::net::lookup_host((host, port)).await {
-                for addr in addrs {
+                let pinned: Vec<std::net::SocketAddr> = addrs.collect();
+                for addr in &pinned {
                     if ip_blocked(addr.ip()) {
                         return Err("不允许访问本机或内网地址".into());
                     }
                 }
+                for addr in pinned {
+                    builder = builder.resolve(host, addr);
+                }
             }
         }
     }
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(12))
-        // 不跟随重定向：否则 302 到 127.0.0.1 可以绕过上面的首跳校验。
-        .redirect(reqwest::redirect::Policy::none())
-        // OSM Nominatim 使用政策要求可识别的 UA；版本号取 Cargo，避免发版后过期
-        .user_agent(concat!(
-            "desktop-todo/",
-            env!("CARGO_PKG_VERSION"),
-            " (https://github.com/zzmxoo/todo_list)"
-        ))
+    let client = builder
         .build()
         .map_err(|e| classify_request_error(&e))?;
     let mut res = client
@@ -397,7 +409,14 @@ async fn get_autostart() -> Result<bool, String> {
         .await
         .map_err(|_| "查询开机启动超时".to_string())?
         .map_err(|e| e.to_string())?;
-        return Ok(output.status.success());
+        if !output.status.success() {
+            return Ok(false);
+        }
+        // 值存在但指向旧路径/已删除的 exe 时，登录自启不会生效，开关应显示关闭。
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let expected = exe.to_string_lossy().to_ascii_lowercase();
+        let actual = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        return Ok(actual.contains(&expected));
     }
     #[cfg(not(windows))]
     {
@@ -457,6 +476,20 @@ async fn set_autostart(enabled: bool) -> Result<bool, String> {
                     .status(),
             )
             .await;
+            // 删完再查一次：权限/策略导致删除失败时不能假装成功。
+            let check = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio::process::Command::new(reg_exe())
+                    .args(["query", AUTOSTART_KEY, "/v", AUTOSTART_NAME])
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .map_err(|_| "校验开机启动删除超时".to_string())?
+            .map_err(|e| e.to_string())?;
+            if check.status.success() {
+                return Err("删除开机启动项失败（可能权限不足）".into());
+            }
         }
         return Ok(enabled);
     }
@@ -533,15 +566,23 @@ fn set_taskbar_hidden(
     window: tauri::Window,
     enabled: bool,
 ) -> Result<(), String> {
-    // 托盘不可用时隐藏任务栏会让窗口彻底失联，必须先拒绝。
-    if enabled && app.tray_by_id(TRAY_ID).is_none() {
-        return Err("托盘创建失败，无法隐藏任务栏；请重启程序后重试".into());
-    }
-    window
-        .set_skip_taskbar(enabled)
-        .map_err(|e| e.to_string())?;
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        tray.set_visible(enabled).map_err(|e| e.to_string())?;
+    if enabled {
+        // 先让托盘图标出现，再隐藏任务栏；任一步失败都回滚，避免「两头都没有」。
+        let tray = app
+            .tray_by_id(TRAY_ID)
+            .ok_or("托盘创建失败，无法隐藏任务栏；请重启程序后重试")?;
+        tray.set_visible(true).map_err(|e| e.to_string())?;
+        if let Err(err) = window.set_skip_taskbar(true) {
+            let _ = tray.set_visible(false);
+            return Err(format!("隐藏任务栏失败：{err}"));
+        }
+    } else {
+        window
+            .set_skip_taskbar(false)
+            .map_err(|e| e.to_string())?;
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            tray.set_visible(false).map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -637,6 +678,8 @@ fn main() {
         .setup(|app| {
             if let Err(err) = build_tray(app.handle()) {
                 eprintln!("tray init failed: {err}");
+                #[cfg(windows)]
+                show_message(&format!("托盘初始化失败：{err}"), "桌面待办");
             }
             Ok(())
         })

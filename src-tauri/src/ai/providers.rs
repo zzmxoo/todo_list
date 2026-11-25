@@ -189,11 +189,20 @@ pub fn parse_duration(raw: &str) -> Result<i64, String> {
             value += parse_minutes_piece(rest)?;
         }
         value
-    } else if text.contains(':') {
-        let (hours, mins) = text
-            .split_once(':')
-            .ok_or_else(|| format!("无法解析时长：{raw}"))?;
-        parse_minutes_piece(hours)? * 60.0 + parse_minutes_piece(mins)?
+    } else if let Some((hours, mins)) = text.split_once(':') {
+        let h: f64 = hours
+            .trim()
+            .parse()
+            .map_err(|_| format!("无法解析时长：{raw}"))?;
+        let m: f64 = mins
+            .trim()
+            .parse()
+            .map_err(|_| format!("无法解析时长：{raw}"))?;
+        let total = h * 60.0 + m;
+        if !h.is_finite() || h < 0.0 || !m.is_finite() || m < 0.0 || m >= 60.0 || total <= 0.0 {
+            return Err(format!("无法解析时长：{raw}"));
+        }
+        total
     } else if let Some(value) = text
         .strip_suffix("分钟")
         .or_else(|| text.strip_suffix('分'))
@@ -540,5 +549,10 @@ mod tests {
         assert!(normalize("generic", &json!({"text": "x", "duration": 30})).is_err());
         assert!(parse_duration("0分钟").is_err());
         assert!(parse_duration("25小时").is_err());
+        assert_eq!(parse_duration("1:00").unwrap(), 60);
+        assert_eq!(parse_duration("1:30").unwrap(), 90);
+        assert_eq!(parse_duration("0:30").unwrap(), 30);
+        assert!(parse_duration("1:60").is_err());
+        assert!(parse_duration("0:00").is_err());
     }
 }

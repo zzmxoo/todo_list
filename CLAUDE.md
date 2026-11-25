@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1 -SkipRust
 powershell -ExecutionPolicy Bypass -File tests\integration.ps1
 ```
 
-测试借 WebView2 的 CDP 端口 9222 在真实应用里执行；`tests/integration-page.js` 是 UI 回归用例，`tests/unit-*.js` 是纯函数用例，`src-tauri/src/main.rs` 的 `mod tests` 测 Rust 纯逻辑（缓动、插值、自启动命令参数），`tests/REGRESSION.md` 是“历史问题 → 用例”的清单。分层原则见 [tests/TESTING.md](tests/TESTING.md)。
+测试借 WebView2 的 CDP 端口 9222 在真实应用里执行；`tests/integration-page.js` 是 UI 回归用例，`tests/unit-*.js` 是纯函数用例，Rust 的 `mod tests` 在 `src-tauri/src/main.rs`（缓动、插值、自启动、网络错误、地址过滤）和 `src-tauri/src/ai/*`（provider、收件箱、MCP、CLI、安装），`tests/REGRESSION.md` 是“历史问题 → 用例”的清单。分层原则见 [tests/TESTING.md](tests/TESTING.md)。
 
 ## 修改规则
 

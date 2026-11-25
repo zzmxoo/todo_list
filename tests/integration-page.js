@@ -1002,13 +1002,23 @@
   });
 
   await t('[REG-19] 节气当天显示节气名与背景', async () => {
-    const reached = await goMonth(2026, 11);
+    // 从当前日期往后找第一个节气日，避免硬编码年份在两年后永久 skip。
+    const core = window.TodoCore;
+    let target = null;
+    const start = new Date();
+    for (let i = 0; i < 370 && !target; i += 1) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i, 12);
+      const term = core.solarTermOn(d);
+      if (term) target = { date: core.ymd(d), term, y: d.getFullYear(), m: d.getMonth() + 1 };
+    }
+    ok(target, 'no solar term in next year');
+    const reached = await goMonth(target.y, target.m);
     if (!reached) return 'skip: month not reachable';
-    const cell = $$('.cal-cell').find((c) => c.dataset.date === '2026-11-22');
+    const cell = $$('.cal-cell').find((c) => c.dataset.date === target.date);
     if (!cell) return 'skip: date not in view';
     cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await sleep(100);
-    eq($('#ciTerm').textContent, '小雪');
+    eq($('#ciTerm').textContent, target.term);
     ok($('#calInfo').style.backgroundImage.includes('data:image'), 'term bg');
     $('#calInfo').hidden = true;
     click($('#calToday'));

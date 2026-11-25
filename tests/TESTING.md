@@ -55,7 +55,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | WebDriverIO E2E | CDP 集成已经驱动真实应用，维护成本更低 | 交互复杂到 CDP 难以稳定表达时 |
 | mockall / wiremock | Rust 没有 trait 编排层，HTTP 只在 `fetch_json` 转发 | Rust 侧出现 Provider、同步、鉴权、token 刷新时 |
 | Tauri mock runtime | 命令都是窗口/注册表/原生对话框，mock 后测不到真实行为 | 新增大量纯 IPC 参数校验命令时 |
-| 远程 CI | 本地 Windows 工具，发布前本地门禁足够 | 仓库推到 GitHub 且需要多人协作时（Windows runner + WebView2） |
+| 远程 CI | CI 只跑 Rust 单测 + 守卫自测；UI 集成仍是本地人工门禁（需要真实 WebView2 窗口与 CDP） | 需要把 UI 集成也搬上 Windows runner 时 |
 
 ## 什么时候升级策略
 

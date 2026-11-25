@@ -40,7 +40,8 @@ $buildTime = if (Test-Path (Join-Path $crateDir 'build.rs')) { (Get-Item (Join-P
 $lockTime = if (Test-Path (Join-Path $crateDir 'Cargo.lock')) { (Get-Item (Join-Path $crateDir 'Cargo.lock')).LastWriteTime } else { $null }
 $capDir = Join-Path $crateDir 'capabilities'
 $capTime = if (Test-Path $capDir) { (Get-ChildItem $capDir -Recurse -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime } else { $null }
-$newer = @($confTime, $uiTime, $srcTime, $cargoTime, $buildTime, $lockTime, $capTime) |
+$scriptTime = (Get-Item $PSCommandPath).LastWriteTime
+$newer = @($confTime, $uiTime, $srcTime, $cargoTime, $buildTime, $lockTime, $capTime, $scriptTime) |
   Where-Object { $_ } |
   Sort-Object -Descending | Select-Object -First 1
 $stampPath = Join-Path $targetDir 'build-stamp.json'

@@ -55,8 +55,34 @@ pub fn data_dir() -> Result<PathBuf, String> {
 }
 
 pub fn inbox_dir(dir: &Path) -> Result<PathBuf, String> {
-    let path = dir.join(INBOX_DIR);
+    // 跨进程收件箱不能放在 AppData：MSIX 的 AppData 虚拟化会让 GUI 与
+    // 外部 AI 客户端看到两个不同目录。生产统一放用户目录，测试仍隔离在临时目录。
+    let path = if cfg!(test) || data_dir_override().is_some() {
+        dir.join(INBOX_DIR)
+    } else {
+        let home = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+            .ok_or_else(|| "USERPROFILE / APPDATA 未设置".to_string())?;
+        home.join(".desktoptodo").join(INBOX_DIR)
+    };
     fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    // 旧版本把收件箱放在 AppData；升级时把尚未处理的条目搬过来（尽力而为）。
+    let legacy = dir.join(INBOX_DIR);
+    if legacy != path && legacy.exists() {
+        if let Ok(entries) = fs::read_dir(&legacy) {
+            for entry in entries.flatten() {
+                let src = entry.path();
+                if src.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    continue;
+                }
+                let dst = path.join(entry.file_name());
+                if !dst.exists() {
+                    let _ = fs::rename(&src, &dst);
+                }
+            }
+        }
+    }
     Ok(path)
 }
 

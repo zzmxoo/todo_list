@@ -24,6 +24,7 @@ $backup = "$data.regress"
 $passed = 0
 $failed = 0
 $skipped = 0
+$extraCases = 0
 
 # 先验证备份守卫本身，再接触任何用户数据。
 $libOut = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-regress-lib.ps1')
@@ -66,6 +67,7 @@ $dataExisted = $null
 $autostartExisted = $false
 $autostartValue = $null
 $autostartSnapshotTaken = $false
+$appWasRunning = $false
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 function Eval-Expr([string]$expr) {
@@ -104,13 +106,25 @@ function Report-Cases($result, [string]$prefix) {
 
 try {
   # 守卫、构建、备份都放在 try 内：任何一步抛错，finally 仍会重启发布版。
+  $appWasRunning = [bool](Get-Process -Name desktop-todo -ErrorAction SilentlyContinue)
   Stop-App
   # REG-23 会写入测试 exe 的路径；这里快照用户真实的 Run 值，结束后原样回填。
   $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-  $autostartProp = Get-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
-  $autostartExisted = $null -ne $autostartProp
-  $autostartValue = if ($autostartExisted) { $autostartProp.DesktopTodo } else { $null }
-  $autostartSnapshotTaken = $true
+  # 只有读取成功才置快照标志；读失败绝不回填，更不能把「读不到」当「没配置」。
+  try {
+    $autostartProp = Get-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction Stop
+    $autostartExisted = $true
+    $autostartValue = $autostartProp.DesktopTodo
+    $autostartSnapshotTaken = $true
+  } catch {
+    if ($_.CategoryInfo.Category -eq 'ObjectNotFound') {
+      $autostartExisted = $false
+      $autostartSnapshotTaken = $true
+    } else {
+      $autostartSnapshotTaken = $false
+      "WARN  读取自启注册表失败，本次不回填：$($_.Exception.Message)"
+    }
+  }
   $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
 
@@ -140,9 +154,10 @@ try {
         $passed += [int]$match.Groups[1].Value
         $failed += [int]$match.Groups[2].Value
       }
-    } elseif ($rustCode -ne 0) {
+    }
+    if ($rustCode -ne 0) {
       $failed += 1
-      'FAIL  RUST cargo test'
+      "FAIL  RUST cargo test exit $rustCode"
     }
     if ($rustPassed -lt $MIN_RUST_CASES) {
       $failed += 1
@@ -197,6 +212,7 @@ fetch('quotes.json')
     "QUOTES total=$($quotes.total) unique=$($quotes.unique) dup=$($quotes.dup) badLen=$($quotes.badLen) badAuthor=$($quotes.badAuthor)"
     if ($quotes.total -eq 1313 -and $quotes.dup -eq 0 -and $quotes.badLen -eq 0 -and $quotes.badAuthor -eq 0) {
       $passed += 1
+      $extraCases += 1
     } else {
       $failed += 1
       "FAIL  QUOTES dataset"
@@ -243,12 +259,18 @@ fetch('quotes.json')
 })()
 '@
     $corruptUi = (Eval-Expr $corruptExpr) | ConvertFrom-Json
-    Start-Sleep -Milliseconds 2600
+    $kept = $false
+    for ($i = 0; $i -lt 20 -and -not $kept; $i++) {
+      Start-Sleep -Milliseconds 200
+      $kept = @(Get-ChildItem -LiteralPath $probeDir -Filter 'data.json.corrupt-*' -ErrorAction SilentlyContinue).Count -gt 0
+    }
+    # 再等两个保存周期，确认前端没有把默认空状态写回去。
+    Start-Sleep -Milliseconds 600
     $recreated = Test-Path -LiteralPath $probeData
-    $kept = @(Get-ChildItem -LiteralPath $probeDir -Filter 'data.json.corrupt-*' -ErrorAction SilentlyContinue).Count -gt 0
     $inboxKept = @(Get-ChildItem -LiteralPath (Join-Path $probeDir 'ai-inbox') -Filter '*.json' -ErrorAction SilentlyContinue).Count -gt 0
     if ($corruptUi.visible -and $corruptUi.ready -and $kept -and -not $recreated -and $inboxKept) {
       $passed += 1
+      $extraCases += 1
       'PASS  [REG-46] data.json 损坏时显示告警、保留原文件且不写盘  [corrupt kept, inbox kept]'
     } else {
       $failed += 1
@@ -261,7 +283,17 @@ fetch('quotes.json')
   }
 }
 finally {
-  Stop-App
+  $stillRunning = $false
+  try {
+    Stop-App
+  } catch {
+    $stillRunning = $true
+    $failed += 1
+    "FAIL  停止进程失败：$($_.Exception.Message)"
+    if ($backupCreated) {
+      "      数据备份仍在 $backup；恢复后可能被运行中的实例覆盖，请人工确认"
+    }
+  }
   # 只恢复本次实际创建的备份；New-UserDataBackup 失败时绝不碰用户数据。
   if ($backupCreated) {
     try {
@@ -288,22 +320,30 @@ finally {
       "FAIL  恢复开机启动注册表失败：$($_.Exception.Message)"
     }
   }
-  $inbox = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
-  if (Test-Path $inbox) {
+  $inboxRoots = @(
+    (Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'),
+    (Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox')
+  )
+  foreach ($inbox in $inboxRoots) {
+    if (-not (Test-Path $inbox)) { continue }
     Get-ChildItem $inbox -Filter '*.json' | ForEach-Object {
       try {
-        if ((Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).text -eq 'ITEST-AI-INSERT') {
+        if ((Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).text -match '^ITEST-(AI-INSERT|CORRUPT-PROBE)$') {
           Remove-Item $_.FullName -Force
         }
       } catch { }
     }
   }
-  # 恢复常驻程序用发布版，不带调试端口
-  if (Test-Path $prodExe) { Start-Process $prodExe }
+  # 只有测试前本来就在运行、且进程已停干净时才重启发布版。
+  if ($appWasRunning -and -not $stillRunning -and (Test-Path $prodExe)) { Start-Process $prodExe }
   try { $regressionMutex.ReleaseMutex() } catch { }
   $regressionMutex.Dispose()
 }
 
+if (-not $SkipUnits -and $extraCases -lt 2) {
+  $failed += 1
+  "FAIL  regression.ps1 内置用例只有 $extraCases 条，expected 2"
+}
 if ($skipped -gt 0) {
   "WARN  $skipped case(s) skipped（网络 / 显示器不满足），不计入失败，但本次全绿不代表这些用例已执行"
 }

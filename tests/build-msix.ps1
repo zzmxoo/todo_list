@@ -59,6 +59,9 @@ foreach ($seg in $parts) {
   }
 }
 $major = [int]$parts[0]
+if ($major -ge 1) {
+  throw "MSIX 版本映射仅支持 0.x.y（当前 $version）；major>=1 后会与历史 1.x.y.0 撞版本，请先更新映射规则"
+}
 if ($major -eq 0) { $major = 1 }  # 商店要求第一段不能为 0
 $msixVersion = '{0}.{1}.{2}.0' -f $major, [int]$parts[1], [int]$parts[2]
 Write-Host "package version: $msixVersion (from $version; revision fixed to 0 for Store)"

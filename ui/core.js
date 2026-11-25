@@ -142,10 +142,10 @@
   // 每次启动都重建对象，漏字段会在下一次保存时永久写丢。
   function normalizeTodos(input) {
     return (Array.isArray(input) ? input : [])
-      .filter((todo) => todo && typeof todo.text === "string")
+      .filter((todo) => todo && todo.text != null)
       .map((todo) => ({
         id: todo.id || newTodoId(),
-        text: todo.text,
+        text: String(todo.text),
         done: !!todo.done,
         done_at: todo.done_at || null,
         pinned: !!todo.pinned,

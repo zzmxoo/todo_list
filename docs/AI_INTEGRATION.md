@@ -9,7 +9,7 @@ AI 客户端
   ├─ MCP stdio:  desktop-todo.exe --mcp      ─┐
   └─ CLI:        desktop-todo.exe --add ...   ─┤
                                              ▼
-                 %APPDATA%\com.desktoptodo.widget\ai-inbox\<id>.json
+                 %USERPROFILE%\.desktoptodo\ai-inbox\<id>.json
                                              ▼  桌面端每秒 drain
                       合并进 data.json（按 id 去重）→ 列表出现待办
 ```

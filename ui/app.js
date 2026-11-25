@@ -236,6 +236,7 @@
   let hoverCell = null;
   let infoHideTimer = null;
   let infoGraceTimer = null;
+  let gridHover = false;
   const weekScroll = new Map();
   const MAX_BARS = 3;
   const INFO_HIDE_DELAY = 1200;
@@ -307,7 +308,8 @@
   const { pickQuote } = window.QuoteDomain;
 
   function wmoInfo(code) {
-    return WMO[Number(code)] || ["未知", "cloud"];
+    const [text, kind] = WMO[Number(code)] || ["未知", "cloud"];
+    return { text, kind };
   }
 
   function toFileUrl(path) {
@@ -835,8 +837,8 @@
   async function flushSave() {
     if (loadFailed) return;
     // 等 drain 合并完成，避免退出时用旧 state 覆盖刚写入的 AI 待办。
-    const deadline = Date.now() + 3000;
-    while (aiPullBusy && Date.now() < deadline) {
+    // 退出路径不做超时：多等一会儿无害，丢一条 AI 待办不可恢复。
+    while (aiPullBusy) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await invoke("save_state", { state: serializeState() });
@@ -947,11 +949,29 @@
       : null;
     const r = picked || (monitors[0] ? monitorRect(monitors[0]) : null);
     if (!r) return;
+    // 单屏优先用工作区（逻辑像素，已排除任务栏）；多屏用当前窗口缩放换算。
+    if (monitors.length === 1) {
+      const left = Number.isFinite(window.screen.availLeft) ? window.screen.availLeft : 0;
+      const top = Number.isFinite(window.screen.availTop) ? window.screen.availTop : 0;
+      currentMonitorBounds = {
+        left,
+        top,
+        right: left + window.screen.availWidth,
+        bottom: top + window.screen.availHeight,
+      };
+      return;
+    }
+    let scale = 1;
+    try {
+      scale = (await win.scaleFactor()) || 1;
+    } catch (err) {
+      /* ignore */
+    }
     currentMonitorBounds = {
-      left: r.x,
-      top: r.y,
-      right: r.x + r.w,
-      bottom: r.y + r.h,
+      left: r.x / scale,
+      top: r.y / scale,
+      right: (r.x + r.w) / scale,
+      bottom: (r.y + r.h) / scale,
     };
   }
 
@@ -2270,15 +2290,15 @@
     els.forecast.innerHTML = "";
     const todayKey = ymd(new Date());
     const tomorrowKey = ymd(new Date(Date.now() + 86400000));
-    days.forEach((day) => {
+    days.forEach((day, index) => {
       const date = new Date(`${day.date}T12:00:00`);
       const row = document.createElement("div");
       row.className = "fc-row";
 
       const label = document.createElement("span");
       label.className = "fc-day";
-      if (day.date === todayKey) label.textContent = "今天";
-      else if (day.date === tomorrowKey) label.textContent = "明天";
+      if (day.date === todayKey || index === 0) label.textContent = "今天";
+      else if (day.date === tomorrowKey || index === 1) label.textContent = "明天";
       else label.textContent = WEEK[date.getDay()];
 
       const icon = document.createElement("span");
@@ -2543,7 +2563,7 @@
     if (dayWeather) {
       const info = wmoInfo(dayWeather.code);
       els.ciWIcon.innerHTML = wxIcon(info.kind, 13);
-      els.ciWText.textContent = `${info[0]}  ${dayWeather.lo}° ~ ${dayWeather.hi}°`;
+      els.ciWText.textContent = `${info.text}  ${dayWeather.lo}° ~ ${dayWeather.hi}°`;
       els.ciWeather.hidden = false;
     } else {
       els.ciWeather.hidden = true;
@@ -3324,7 +3344,7 @@
         const nextCell = cell;
         infoGraceTimer = setTimeout(() => {
           infoGraceTimer = null;
-          if (els.calInfo.hidden) return;
+          if (els.calInfo.hidden || !gridHover) return;
           hideCalInfo();
           startCellHover(nextCell);
         }, 300);
@@ -3351,7 +3371,12 @@
       scheduleHideCalInfo();
     });
 
+    els.calGrid.addEventListener("mouseenter", () => {
+      gridHover = true;
+    });
+
     els.calGrid.addEventListener("mouseleave", () => {
+      gridHover = false;
       // 同上：固定弹框由自己的计时器负责关闭
       if (infoPinned) return;
       scheduleHideCalInfo();
