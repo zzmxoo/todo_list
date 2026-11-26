@@ -76,10 +76,13 @@ $autostartExisted = $false
 $autostartValue = $null
 $autostartSnapshotTaken = $false
 $appWasRunning = $false
+$originalAppPath = $null
 $inboxReal = Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'
 $inboxLegacy = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
 $inboxHold = $null
 $legacyHold = $null
+$inboxExisted = $false
+$legacyExisted = $false
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 function Eval-Expr([string]$expr) {
@@ -119,6 +122,9 @@ function Report-Cases($result, [string]$prefix) {
 try {
   # 守卫、构建、备份都放在 try 内：任何一步抛错，finally 仍会重启发布版。
   $appWasRunning = [bool](Get-Process -Name desktop-todo -ErrorAction SilentlyContinue)
+  if ($appWasRunning) {
+    $originalAppPath = (Get-Process -Name desktop-todo -ErrorAction SilentlyContinue | Select-Object -First 1).Path
+  }
   Stop-App
   # REG-23 会写入测试 exe 的路径；这里快照用户真实的 Run 值，结束后原样回填。
   $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -140,13 +146,17 @@ try {
   $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
   # 测试版会 drain 真实收件箱并删除源文件；先整个挪走，结束后原样放回。
-  if (Test-Path -LiteralPath $inboxReal) {
-    $inboxHold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-' + [guid]::NewGuid().ToString('N'))
-    Move-Item -LiteralPath $inboxReal -Destination $inboxHold -Force
+  $inboxExisted = Test-Path -LiteralPath $inboxReal
+  if ($inboxExisted) {
+    $hold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-' + [guid]::NewGuid().ToString('N'))
+    Move-Item -LiteralPath $inboxReal -Destination $hold -Force -ErrorAction Stop
+    $inboxHold = $hold
   }
-  if (Test-Path -LiteralPath $inboxLegacy) {
-    $legacyHold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-legacy-' + [guid]::NewGuid().ToString('N'))
-    Move-Item -LiteralPath $inboxLegacy -Destination $legacyHold -Force
+  $legacyExisted = Test-Path -LiteralPath $inboxLegacy
+  if ($legacyExisted) {
+    $hold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-legacy-' + [guid]::NewGuid().ToString('N'))
+    Move-Item -LiteralPath $inboxLegacy -Destination $hold -Force -ErrorAction Stop
+    $legacyHold = $hold
   }
 
   # 测试用 exe：编译期注入调试端口，产物隔离在 src-tauri\target-test\。
@@ -259,9 +269,11 @@ fetch('quotes.json')
     "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least $MIN_INTEGRATION_CASES"
   }
   $executed = @($result.results | Where-Object { -not $_.skipped }).Count
-  if ($executed -lt $MIN_INTEGRATION_EXECUTED) {
+  $skippedCases = [int]$result.skipped
+  $executedFloor = [Math]::Max(0, $MIN_INTEGRATION_EXECUTED - $skippedCases)
+  if ($executed -lt $executedFloor) {
     $failed += 1
-    "FAIL  INTEGRATION only $executed cases actually executed, expected at least $MIN_INTEGRATION_EXECUTED"
+    "FAIL  INTEGRATION only $executed cases actually executed, expected at least $executedFloor（skip=$skippedCases）"
   }
 
   # REG-46 端到端：损坏的 data.json 不能被静默写成空壳。
@@ -374,22 +386,38 @@ finally {
     }
   }
   # 清掉测试期间新建的收件箱，再把用户原收件箱放回。
-  Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue
-  if ($inboxHold -and (Test-Path -LiteralPath $inboxHold)) {
-    New-Item -ItemType Directory -Force -Path (Split-Path $inboxReal -Parent) | Out-Null
-    Move-Item -LiteralPath $inboxHold -Destination $inboxReal -Force
+  # 只有「确实搬走成功」才允许删除/恢复；搬走失败时用户目录原样保留。
+  if ($inboxExisted) {
+    if ($inboxHold) {
+      Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
+      New-Item -ItemType Directory -Force -Path (Split-Path $inboxReal -Parent) | Out-Null
+      Move-Item -LiteralPath $inboxHold -Destination $inboxReal -Force
+    }
+  } else {
+    Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
   }
-  if ($legacyHold -and (Test-Path -LiteralPath $legacyHold)) {
-    New-Item -ItemType Directory -Force -Path (Split-Path $inboxLegacy -Parent) | Out-Null
-    Move-Item -LiteralPath $legacyHold -Destination $inboxLegacy -Force
+  if ($legacyExisted) {
+    if ($legacyHold) {
+      Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue
+      New-Item -ItemType Directory -Force -Path (Split-Path $inboxLegacy -Parent) | Out-Null
+      Move-Item -LiteralPath $legacyHold -Destination $inboxLegacy -Force
+    }
+  } else {
+    Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue
   }
   # 只有测试前本来就在运行、且进程已停干净时才重启发布版。
   if ($appWasRunning -and -not $stillRunning) {
-    if (Test-Path $prodExe) {
-      Start-Process $prodExe
+    $restart = if ($originalAppPath -and (Test-Path -LiteralPath $originalAppPath)) {
+      $originalAppPath
+    } elseif (Test-Path $prodExe) {
+      $prodExe
     } else {
-      "WARN  测试前的实例不是 $prodExe，未自动重启，请手动启动"
+      $null
+    }
+    if ($restart) {
+      Start-Process $restart
+    } else {
+      "WARN  测试前的实例路径不可用，未自动重启，请手动启动"
     }
   }
   try { $regressionMutex.ReleaseMutex() } catch { }

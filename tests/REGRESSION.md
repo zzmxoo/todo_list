@@ -132,6 +132,8 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-106 | MSIX skip 不再导致 CI 硬失败；集成门禁要求实际执行数；断网 REG-11/38 转 skip；REG-36 断言注入发生；REG-44 还原进 finally | 本次修复 | workflow + 对应用例 |
 | REG-107 | 互斥量失败有提示并退 Local；保存前留 `data.json.bak`；收件箱 tmp 带 PID；坏样本带时间戳不覆盖 | 本次修复 | Rust 单测 + 代码审查 |
 | REG-108 | 多屏按物理像素选屏再换算逻辑边界；天气按接口日期映射；weatherBusy 脏标记；删除可撤销；只读禁用天气胶囊；节气按本地日期；自定义天气同源校验；测试自启写独立注册表键 | 本次修复 | REG-45/68 + 人工多屏/撤销验证 |
+| REG-109 | 迁移失败要上报、成功后写标记且损坏备份存在时不复活旧副本；收件箱搬走失败时不得删除用户目录；AI 合并期间不写盘；退出兜底 8s；save_state 校验 todos/settings；只读瞬时读失败重试 | 本次修复 | Rust 单测 + `regression.ps1` / `integration.ps1` |
+| REG-110 | 门禁与文档：实际执行数随 skip 调整；`other` 类名；4xx 测试调用实现；测试 exe 缓存含提交号；changelog 数据路径；REG-04 主动重绘；REG-27 查询失败不 skip | 本次修复 | 对应用例与 workflow |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

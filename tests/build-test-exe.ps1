@@ -26,6 +26,9 @@ $win | Add-Member -NotePropertyName additionalBrowserArgs -NotePropertyValue (
 ) -Force
 # 测试窗口带 ?test=1，前端据此才挂载 __TEST_* 钩子；生产窗口不受影响。
 $win | Add-Member -NotePropertyName url -NotePropertyValue 'index.html?test=1' -Force
+# 测试窗口不要压在最上层，也不占任务栏，避免干扰用户当前工作界面。
+$win | Add-Member -NotePropertyName alwaysOnTop -NotePropertyValue $false -Force
+$win | Add-Member -NotePropertyName skipTaskbar -NotePropertyValue $true -Force
 
 $override = @{ app = @{ windows = @($win) } } | ConvertTo-Json -Depth 12 -Compress
 
@@ -48,11 +51,13 @@ $newer = @($confTime, $uiTime, $srcTime, $cargoTime, $buildTime, $lockTime, $cap
   Where-Object { $_ } |
   Sort-Object -Descending | Select-Object -First 1
 $stampPath = Join-Path $targetDir 'build-stamp.json'
+$gitHead = (& git -C $root rev-parse HEAD 2>$null | Select-Object -First 1)
+if (-not $gitHead) { $gitHead = '' }
 $stampOk = $false
 if (Test-Path $stampPath) {
   try {
     $stamp = Get-Content $stampPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $stampOk = ([int]$stamp.port -eq $Port)
+    $stampOk = ([int]$stamp.port -eq $Port) -and ([string]$stamp.commit -eq [string]$gitHead)
   } catch { $stampOk = $false }
 }
 
@@ -90,7 +95,7 @@ if ($code -ne 0) {
 if (-not (Test-Path $exe)) { throw "build succeeded but exe not found: $exe" }
 
 # 记录端口与构建时间；端口变了必须重建，不能复用带旧调试端口的缓存。
-@{ port = $Port; built = (Get-Date).ToString('o') } |
+@{ port = $Port; commit = [string]$gitHead; built = (Get-Date).ToString('o') } |
   ConvertTo-Json -Compress |
   Set-Content -LiteralPath $stampPath -Encoding UTF8
 

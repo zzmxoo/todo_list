@@ -107,7 +107,7 @@ $lines.Add('**下载**')
 $lines.Add('- `desktop-todo_' + $version + '-setup.exe` —— 安装版（推荐）')
 $lines.Add('- `desktop-todo_' + $version + '.exe` —— 免安装，直接双击运行')
 $lines.Add('')
-$lines.Add('用户数据位于 `%APPDATA%\com.desktoptodo.widget\data.json`，升级不会丢失。')
+$lines.Add('用户数据位于 `%USERPROFILE%\.desktoptodo\data.json`，旧版 `%APPDATA%\com.desktoptodo.widget\` 会在首次启动自动迁移。')
 
 $limits = @{ '新增' = 5; '修复' = 5; '优化' = 5; '其它变更' = 3 }
 $hasAny = $false

@@ -350,6 +350,12 @@ pub fn normalize_due(raw: &str) -> Result<String, String> {
     if !shape_ok {
         return Err(format!("due 不是合法时间：{raw}"));
     }
+    // 尾部只允许秒、毫秒、时区字符；不能放行 "junk" 之类的垃圾。
+    if bytes[16..].iter().any(|b| {
+        !(b.is_ascii_digit() || matches!(*b, b':' | b'.' | b'T' | b'Z' | b'z' | b'+' | b'-'))
+    }) {
+        return Err(format!("due 不是合法时间：{raw}"));
+    }
     if !valid_date_time(
         parse_digits(&bytes[0..4]),
         parse_digits(&bytes[5..7]),

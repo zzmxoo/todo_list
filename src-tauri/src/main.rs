@@ -13,19 +13,71 @@ use tauri::{Emitter, Manager};
 #[link(name = "winmm")]
 extern "system" {
     fn timeBeginPeriod(period: u32) -> u32;
+    fn timeEndPeriod(period: u32) -> u32;
+}
+
+/// 只在窗口动画期间提高定时器精度，常驻进程不长期锁 1ms。
+#[cfg(windows)]
+struct TimerPrecision;
+#[cfg(windows)]
+impl TimerPrecision {
+    fn new() -> Self {
+        unsafe {
+            timeBeginPeriod(1);
+        }
+        Self
+    }
+}
+#[cfg(windows)]
+impl Drop for TimerPrecision {
+    fn drop(&mut self) {
+        unsafe {
+            timeEndPeriod(1);
+        }
+    }
 }
 
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // 与 CLI/MCP 共用不受 MSIX 虚拟化影响的用户目录。
     let dir = ai::data_dir()?;
     // 首次升级时把旧 AppData 里的 data.json 复制到新位置（测试目录不迁移）。
-    if ai::data_dir_override().is_none() && !dir.join("data.json").exists() {
-        if let Ok(old) = app.path().app_data_dir() {
-            let old_file = old.join("data.json");
-            if old != dir && old_file.exists() {
-                let _ = fs::copy(&old_file, dir.join("data.json"));
+    let marker = dir.join(".migrated-from-appdata");
+    if ai::data_dir_override().is_none()
+        && !dir.join("data.json").exists()
+        && !marker.exists()
+    {
+        // 已有损坏备份时绝不能拿旧副本复活陈旧数据。
+        let has_corrupt = fs::read_dir(&dir)
+            .map(|entries| {
+                entries.flatten().any(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .map(|name| name.starts_with("data.json.corrupt-"))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        if !has_corrupt {
+            if let Ok(old) = app.path().app_data_dir() {
+                let old_file = old.join("data.json");
+                if old != dir && old_file.exists() {
+                    fs::copy(&old_file, dir.join("data.json")).map_err(|e| {
+                        format!(
+                            "迁移旧数据失败：{e}；旧文件仍在 {}，请复制到 {} 后重试",
+                            old_file.display(),
+                            dir.display()
+                        )
+                    })?;
+                    let _ = fs::write(&marker, "migrated");
+                    let _ = fs::rename(&old_file, old_file.with_extension("json.migrated"));
+                }
             }
         }
+    }
+    // 新目录已有数据时也记下迁移标记：以后即使 data.json 丢失，也不能拿旧副本复活。
+    if ai::data_dir_override().is_none() && dir.join("data.json").exists() && !marker.exists() {
+        let _ = fs::write(&marker, "present");
     }
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
@@ -43,6 +95,20 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
 fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
     if !state.is_object() {
         return Err("状态格式异常，已拒绝写入".into());
+    }
+    if state
+        .get("todos")
+        .map(|value| !value.is_array())
+        .unwrap_or(false)
+    {
+        return Err("待办列表格式异常，已拒绝写入".into());
+    }
+    if state
+        .get("settings")
+        .map(|value| !value.is_object())
+        .unwrap_or(false)
+    {
+        return Err("设置格式异常，已拒绝写入".into());
     }
     let _guard = ai::inbox::lock_state();
     let path = data_dir(&app)?.join("data.json");
@@ -144,10 +210,23 @@ async fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
     // 前端只引用 settings.bg_image 一个路径，旧背景图不再需要。
+    // 但要跳过当前正在用的那张：前端保存新路径失败时它仍是唯一可显示的图。
+    let keep_bg = fs::read(dir.join("data.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(ai::inbox::strip_bom(&bytes)).ok())
+        .and_then(|root| {
+            root.get("settings")?
+                .get("bg_image")?
+                .as_str()
+                .map(|value| value.to_string())
+        });
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path == dst {
+                continue;
+            }
+            if keep_bg.as_deref() == Some(path.to_string_lossy().as_ref()) {
                 continue;
             }
             let is_bg = path
@@ -298,6 +377,13 @@ fn same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
         && a.port_or_known_default() == b.port_or_known_default()
 }
 
+/// HTTP 状态错误属于服务端/配置问题，不是网络不可用；5xx 与 429 可重试。
+fn http_status_error(code: u16) -> String {
+    let retryable = (500..=599).contains(&code) || code == 429;
+    let prefix = if retryable { NET_ERR } else { "" };
+    format!("{prefix}请求失败：HTTP {code}")
+}
+
 /// 代用户请求接口，绕开 WebView 的跨域限制。
 #[tauri::command]
 async fn fetch_json(
@@ -381,12 +467,7 @@ async fn fetch_json(
         .await
         .map_err(|e| classify_request_error(&e))?;
     if !res.status().is_success() {
-        // HTTP 状态错误属于服务端/配置问题，不是网络不可用：不带 NET_ERR 前缀。
-        // 5xx 与 429 视为暂时性错误，前端可重试。
-        let code = res.status().as_u16();
-        let retryable = res.status().is_server_error() || code == 429;
-        let prefix = if retryable { NET_ERR } else { "" };
-        return Err(format!("{prefix}请求失败：HTTP {code}"));
+        return Err(http_status_error(res.status().as_u16()));
     }
     // 这是渲染进程唯一的外网通道，边读边限制响应体大小，
     // 不能先 res.bytes() 再校验（chunked 响应会先占满内存）。
@@ -484,6 +565,8 @@ async fn animate_window(
     duration_ms: u64,
     id: u64,
 ) -> Result<(), String> {
+    #[cfg(windows)]
+    let _timer = TimerPrecision::new();
     let gen = WINDOW_ANIM_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let start = window.outer_position().map_err(|e| e.to_string())?;
     let _ = window.emit("edge-anim-start", id);
@@ -660,7 +743,7 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                 let _ = app.emit("tray-quit", ());
                 let handle = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
                     handle.exit(0);
                 });
             }
@@ -748,10 +831,11 @@ fn already_running() -> bool {
             eprintln!("single-instance: mutex unavailable, protection disabled");
             #[cfg(not(feature = "test-data-dir"))]
             show_message(
-                "单实例保护不可用，请确认没有重复启动桌面待办。",
+                "单实例保护不可用，为避免两个实例互相覆盖数据，本次不启动。",
                 "桌面待办",
             );
-            return false;
+            // 无法确认是否已有实例时，宁可不启动，也不冒险双开写坏 data.json。
+            return true;
         }
     }
     unsafe { GetLastError() == ERROR_ALREADY_EXISTS }
@@ -809,11 +893,6 @@ fn main() {
         return;
     }
 
-    // 提高系统定时器精度到 1ms，保证 Rust 侧窗口动画的逐帧间隔均匀
-    #[cfg(windows)]
-    unsafe {
-        timeBeginPeriod(1);
-    }
     let result = tauri::Builder::default()
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -822,7 +901,7 @@ fn main() {
                 let _ = window.emit("window-close-request", ());
                 let win = window.clone();
                 tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
                     let _ = win.destroy();
                 });
             }
@@ -967,12 +1046,7 @@ mod tests {
     /// 5xx / 429 属于暂时性错误，需要带 NET_ERR 前缀让前端重试。
     #[test]
     fn http_status_error_prefix_follows_retryability() {
-        let msg = |code: u16| {
-            let status = reqwest::StatusCode::from_u16(code).unwrap();
-            let retryable = status.is_server_error() || code == 429;
-            let prefix = if retryable { NET_ERR } else { "" };
-            format!("{prefix}请求失败：HTTP {code}")
-        };
+        let msg = http_status_error;
         // 4xx（认证/找不到）不是网络故障，不带前缀 -> 不重试、不污染 networkOk
         assert!(!msg(401).starts_with(NET_ERR));
         assert!(!msg(403).starts_with(NET_ERR));

@@ -341,6 +341,9 @@
     window.Date = FakeDate;
     try {
       await sleep(1150);
+      // 主动触发一次重绘，证明“重绘发生且草稿仍保留”，而不是只等 tick。
+      window.__TEST_RENDER_TODOS();
+      await sleep(100);
     } finally {
       window.Date = RealDate;
     }
@@ -818,7 +821,7 @@
     const info = $('#calInfo');
     info.hidden = true;
     const cells = $$('.cal-cell');
-    const cell = cells.find((c) => !c.classList.contains('other-month') && c.dataset.date);
+    const cell = cells.find((c) => !c.classList.contains('other') && c.dataset.date);
     ok(cell, 'a date cell');
     // 探针：构造一次 contextmenu（右键总是立即显示），确认弹框机制可用
     cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
@@ -842,7 +845,7 @@
     // 关键回归：光标经过其它日期格时弹框不能立即消失
     // （旧实现 mouseover 里无条件 hideCalInfo，光标从 19 号移向弹框
     //   途中经过 18 号就会把弹框干掉）
-    const other = cells.find((c) => c !== cell && !c.classList.contains('other-month'));
+    const other = cells.find((c) => c !== cell && !c.classList.contains('other'));
     ok(other, 'another cell to pass over');
     other.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     await sleep(120);
@@ -1087,7 +1090,7 @@
       const info = document.getElementById('calInfo');
       if (!info) return false;
       info.hidden = true;
-      const cell = $$('.cal-cell').find((c) => !c.classList.contains('other-month'));
+      const cell = $$('.cal-cell').find((c) => !c.classList.contains('other'));
       if (!cell) return false;
       cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
       return info.hidden === false;
@@ -1368,11 +1371,12 @@
 
     await w.setPosition(new PPos(200, 300));
     await sleep(900);
-    let rightInfo = 'skip: no monitor';
+    let rightInfo = 'right check failed';
     try {
-      const monitors = window.__TAURI__.window.availableMonitors
-        ? await window.__TAURI__.window.availableMonitors()
-        : [];
+      const api = window.__TAURI__.window.availableMonitors;
+      if (!api) return 'skip: no monitor api';
+      const monitors = await api();
+      if (!monitors.length) return 'skip: no monitor';
       const mon =
         monitors.find((item) => {
           const left = item.position.x;
@@ -1403,8 +1407,8 @@
         rightInfo = 'right ok';
       }
     } catch (err) {
-      if (rightInfo !== 'skip: no monitor') throw err;
-      rightInfo = 'skip: no monitor (' + err.message + ')';
+      // 显示器查询被拒 / API 异常是真问题，不能再降级成 skip。
+      throw err;
     } finally {
       await w.setPosition(new PPos(orig.x, orig.y));
       await sleep(600);

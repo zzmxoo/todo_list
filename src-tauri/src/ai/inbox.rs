@@ -101,6 +101,22 @@ fn read_todos(dir: &Path) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn read_with_retry(path: &Path) -> Result<Vec<u8>, String> {
+    let mut last = String::new();
+    for attempt in 0..3 {
+        match fs::read(path) {
+            Ok(bytes) => return Ok(bytes),
+            Err(err) => {
+                last = err.to_string();
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    }
+    Err(format!("读取 data.json 失败（可能被短暂占用）：{last}"))
+}
+
 pub(crate) fn strip_bom(bytes: &[u8]) -> &[u8] {
     bytes
         .strip_prefix(&[0xEF, 0xBB, 0xBF][..])
@@ -222,7 +238,7 @@ pub fn read_state_root(path: &Path) -> Result<Value, String> {
     }
     // 用 bytes 解析：非 UTF-8 也属于内容损坏，应走隔离与恢复指引，
     // 而不是变成一个没有备份、没有提示的 IO 错误。
-    let bytes = fs::read(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
+    let bytes = read_with_retry(path)?;
     let root = match serde_json::from_slice::<Value>(strip_bom(&bytes)) {
         Ok(value) => value,
         Err(err) => return Err(corrupt_error(path, err.to_string())),
@@ -242,7 +258,7 @@ pub fn ensure_overwritable(path: &Path) -> Result<(), String> {
         }
         return Ok(());
     }
-    let bytes = fs::read(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
+    let bytes = read_with_retry(path)?;
     match serde_json::from_slice::<Value>(strip_bom(&bytes)) {
         Ok(value) if value.is_object() => Ok(()),
         Ok(_) => Err(corrupt_error(path, "根节点不是对象".into())),

@@ -530,6 +530,11 @@
     els.ciQuote = document.getElementById("ciQuote");
     els.ciQuoteText = document.getElementById("ciQuoteText");
     els.ciQuoteFrom = document.getElementById("ciQuoteFrom");
+    const required = ["app", "todoList", "addRow", "settingsBtn", "loadError", "settingsOverlay"];
+    const missing = required.filter((key) => !els[key]);
+    if (missing.length) {
+      throw new Error("缺少 DOM 节点：" + missing.join(", "));
+    }
   }
 
   async function loadAppVersion() {
@@ -815,7 +820,7 @@
   function save() {
     if (loadFailed) return; // 数据文件损坏时保持只读，避免覆盖待恢复的原文件
     // drain 正在把 AI 待办合并进 data.json；此时用旧 state 整包保存会把它覆盖掉。
-    if (aiPullBusy && Date.now() - aiBusySince < 5000) {
+    if (aiPullBusy) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(save, 200);
       return;
@@ -824,7 +829,7 @@
     saveTimer = setTimeout(async () => {
       // 排队之后、真正写盘之前 drain 可能已经开始；必须再检查一次，
       // 否则旧 state 会整包覆盖刚合并进磁盘的 AI 待办。
-      if (aiPullBusy && Date.now() - aiBusySince < 5000) {
+      if (aiPullBusy) {
         save();
         return;
       }
@@ -868,13 +873,21 @@
     saveTimer = null;
     const deadline = Date.now() + 5000;
     // 等 drain 合并完成，避免退出时用旧 state 覆盖刚写入的 AI 待办。
-    // 但 IPC 卡死不能把退出也锁死：5 秒后照常写盘退出（收件箱条目还在）。
     while (aiPullBusy && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (aiPullBusy) {
+      // drain 可能已经把收件箱写进磁盘并删了源文件；这时绝不能整包覆盖。
+      showSaveError();
+      throw new Error("AI 合并尚未完成，已取消本次写入");
     }
     // 等已经在途的写盘结束，再写最新状态。
     while (saving && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    if (saving) {
+      showSaveError();
+      throw new Error("上一次写入尚未完成，已取消本次写入");
     }
     await invoke("save_state", { state: serializeState() });
   }
@@ -1736,8 +1749,7 @@
       els.todoList.appendChild(buildRow(todo));
     }
 
-    const remaining = list.filter((todo) => !todo.done).length;
-    els.count.textContent = list.length ? `${remaining} 项` : "";
+    els.count.textContent = list.length ? `${list.length} 项` : "";
     els.todoList.scrollTop = scrollTop;
     renderCalendar();
   }
@@ -1849,7 +1861,6 @@
 
   /* --------------------------------------------------------- AI 接入 */
   let aiPullBusy = false;
-  let aiBusySince = 0;
   let aiPullFailures = 0;
   let aiNextAttempt = 0;
 
@@ -1864,7 +1875,6 @@
     if (loadFailed) return; // 损坏数据待恢复时，收件箱也不能写盘
     if (aiPullBusy || Date.now() < aiNextAttempt) return;
     aiPullBusy = true;
-    aiBusySince = Date.now();
     try {
       const items = await invoke("drain_ai_todos");
       if (!Array.isArray(items) || !items.length) {
@@ -1902,7 +1912,6 @@
       aiNextAttempt = Date.now() + delay;
     } finally {
       aiPullBusy = false;
-      aiBusySince = 0;
     }
   }
 
@@ -2389,10 +2398,16 @@
     els.wcCond.textContent = stale ? `${info.text} · 数据可能过期` : info.text;
     els.wcExtra.textContent = `湿度 ${current.humidity ?? "--"}%  ·  风速 ${current.wind ?? "--"} km/h`;
 
-    const today = data.daily && data.daily[0];
+    const daily = data.daily || [];
+    const todayKey = ymd(new Date());
+    const today = daily.find((day) => day && day.date === todayKey) || daily[0];
     els.wcHilo.textContent = today ? `最高 ${today.hi}°  /  最低 ${today.lo}°` : "";
 
-    const days = data.daily || [];
+    if (!daily.length) {
+      els.forecast.innerHTML = "";
+      return;
+    }
+    const days = daily;
     const lows = days.map((day) => day.lo);
     const highs = days.map((day) => day.hi);
     const min = Math.min(...lows, ...highs);
@@ -2400,17 +2415,16 @@
     const span = Math.max(1, max - min);
 
     els.forecast.innerHTML = "";
-    const todayKey = ymd(new Date());
     const tomorrowKey = ymd(new Date(Date.now() + 86400000));
-    days.forEach((day, index) => {
+    days.forEach((day) => {
       const date = new Date(`${day.date}T12:00:00`);
       const row = document.createElement("div");
       row.className = "fc-row";
 
       const label = document.createElement("span");
       label.className = "fc-day";
-      if (day.date === todayKey || index === 0) label.textContent = "今天";
-      else if (day.date === tomorrowKey || index === 1) label.textContent = "明天";
+      if (day.date === todayKey) label.textContent = "今天";
+      else if (day.date === tomorrowKey) label.textContent = "明天";
       else label.textContent = WEEK[date.getDay()];
 
       const icon = document.createElement("span");
@@ -2482,8 +2496,10 @@
 
     if (show && weatherLeft) {
       await setWindowPos(before.x - (WEATHER_W + GAP), before.y);
+      await clampWindowPosition();
     } else if (!show && weatherLeft) {
       await setWindowPos(before.x + (WEATHER_W + GAP), before.y);
+      await clampWindowPosition();
     }
     save();
   }
@@ -3254,7 +3270,10 @@
     els.weatherPill.addEventListener("click", () => toggleWeather());
     els.settingsBtn.addEventListener("click", () => {
       if (settingsOpen) closeSettings();
-      else openSettings();
+      else openSettings().catch((err) => {
+        settingsOpen = false;
+        console.error("openSettings failed", err);
+      });
     });
   }
 
@@ -3329,7 +3348,7 @@
     els.calAddDate.addEventListener("change", () => applyCalAddTime());
     els.calAddTimeValue.addEventListener("change", () => applyCalAddTime());
     els.calAddDate.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
         event.preventDefault();
         applyCalAddTime();
@@ -3340,7 +3359,7 @@
       }
     });
     els.calAddTimeValue.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
         event.preventDefault();
         applyCalAddTime();
@@ -3351,7 +3370,7 @@
       }
     });
     els.calAddInput.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
         event.preventDefault();
         submitCalAdd();
@@ -3672,15 +3691,22 @@
       // 先给出视觉反馈，写入注册表在后台完成
       state.settings.autostart = next;
       setSwitch(els.autostartSwitch, next);
+      let applied;
       try {
-        const applied = await invoke("set_autostart", { enabled: next });
-        state.settings.autostart = !!applied;
-        setSwitch(els.autostartSwitch, !!applied);
-        await flushSave(); // 系统状态已变，磁盘值必须立即跟上
+        applied = await invoke("set_autostart", { enabled: next });
       } catch (err) {
         console.warn("autostart failed", err);
         state.settings.autostart = !next;
         setSwitch(els.autostartSwitch, !next);
+        return;
+      }
+      state.settings.autostart = !!applied;
+      setSwitch(els.autostartSwitch, !!applied);
+      try {
+        await flushSave(); // 系统状态已变，磁盘值必须立即跟上
+      } catch (err) {
+        console.warn("save after autostart failed", err);
+        showSaveError();
       }
     });
 
@@ -3742,14 +3768,15 @@
     els.locateBtn.addEventListener("click", () => locate());
 
     els.quitBtn.addEventListener("click", async () => {
+      let canExit = true;
       try {
         await flushSave();
       } catch (err) {
         console.warn(err);
-      } finally {
-        // 写盘失败也必须能退出，不能把用户困在程序里。
-        if (win) await win.close();
+        showSaveError();
+        canExit = window.confirm("保存失败，最近的修改可能未写入磁盘。仍要退出吗？");
       }
+      if (canExit && win) await win.close();
     });
   }
 
@@ -3762,6 +3789,7 @@
           await flushSave();
         } catch (err) {
           console.warn("flush before quit failed", err);
+          showSaveError();
         }
         invoke("quit_app").catch(() => {});
       }).catch(() => {});
@@ -3770,6 +3798,7 @@
           await flushSave();
         } catch (err) {
           console.warn("flush before close failed", err);
+          showSaveError();
         }
         if (win) await win.destroy();
       }).catch(() => {});
