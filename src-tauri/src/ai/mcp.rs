@@ -153,12 +153,21 @@ fn add_todos(args: &Value, dir: &Path) -> Result<Value, String> {
 fn list_open_todos(dir: &Path) -> Result<Value, String> {
     let mut seen = HashSet::new();
     let mut items = Vec::new();
-    let root = inbox::read_state_root(&dir.join("data.json"))?;
-    let stored = root
-        .get("todos")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    // list 是只读工具：不能调用 read_state_root（损坏时会隔离文件）。
+    let path = dir.join("data.json");
+    let stored = match std::fs::read(&path) {
+        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(root) => root
+                .get("todos")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            Err(err) => {
+                return Ok(tool_result(format!("data.json 损坏，无法读取历史待办：{err}"), true));
+            }
+        },
+        Err(_) => Vec::new(),
+    };
     for todo in stored {
         let Some(id) = todo.get("id").and_then(Value::as_str) else {
             continue;

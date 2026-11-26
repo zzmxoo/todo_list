@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-76 | 自定义天气接口允许本机/内网地址，其余 `fetch_json` 调用仍拦截；上述例外有隐私文档说明 | 本次修复 | Rust 地址过滤用例 + 人工核对 `allowLocal` 调用点 |
 | REG-77 | 双击行内按钮不会让下一条进入编辑；同一坐标连续点不同待办不会被误吞 | 本次修复 | REG-67 + 人工快速连点 |
 | REG-78 | 窗口关闭（Alt+F4）先 flush 再销毁；系统开关（置顶/自启/任务栏）成功后立即落盘 | 本次修复 | 人工关闭窗口；代码审查 `window-close-request` / `flushSave` |
-| REG-79 | `finally` 里的 `Stop-App` 失败不能跳过数据/注册表恢复；只有测试前在运行才重启发布版 | 本次修复 | `regression.ps1` / `integration.ps1` 的 `$stillRunning` / `$appWasRunning` |
+| REG-79 | `finally` 里的 `Stop-App` 失败不能跳过注册表恢复；进程仍存活时不恢复数据并保留 `.keep` 副本；只有测试前在运行才重启发布版 | 本次修复 | `regression.ps1` / `integration.ps1` 的 `$stillRunning` / `$appWasRunning` |
 | REG-80 | `wmoInfo` 返回对象后六个调用点取 `.kind`/`.text`，天气图标与文案不再恒为多云/undefined | 本次修复 | 人工查看天气卡；代码审查 |
 | REG-81 | 多屏边界换算为逻辑像素；单屏优先用 `screen.avail*` 工作区 | 本次修复 | REG-24 + 125% 缩放手测 |
 | REG-82 | 生产收件箱改到 `%USERPROFILE%\.desktoptodo\ai-inbox`，避免 MSIX AppData 虚拟化劈成两个目录；旧收件箱自动迁移 | 本次修复 | REG-45；商店版真机 `--add` 验证 |
@@ -111,6 +111,14 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-85 | tray 初始化失败提示、任务栏与托盘换序回滚、capabilities 允许 destroy、自定义天气允许有限跳转、`1:00` 时长、自启路径比对、退出 flush 不超时、悬停 grace 复位、文本强制转字符串、预报首行兜底 | 本次修复 | Rust 时长/地址用例；`unit-core`；人工手测 |
 | REG-86 | 天气预报按「本地今天 + 第 i 天」映射日历日期，城市时区与系统不同也不会丢天气图标 | 本次修复 | 人工切换异地城市；代码审查 `localWeatherDayKey` |
 | REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 50 条 |
+| REG-88 | 自启回读整路径编码损坏时退化为文件名匹配，中文安装路径不会恒显示「已关闭」 | 本次修复 | Rust `autostart_output_falls_back_to_ascii_file_name` |
+| REG-89 | 损坏备份窗口放宽到 30 天，mtime 刷新失败会打印告警，不会刚隔离就“过期” | 本次修复 | Rust `stale_corrupt_backup...`（31 天）+ 代码审查 |
+| REG-90 | 边缘收起期间被跳过的布局，弹出后补跑 `scheduleLayout()` | 本次修复 | 人工：贴边收起时 AI 写入待办 |
+| REG-91 | CDP 就绪后校验页面 URL 含 `?test=1`，不把用例送进别人的调试页 | 本次修复 | `regression.ps1` / `integration.ps1` |
+| REG-92 | REG-19/20 找不到目标不再 skip；REG-49 不可滚如实记 skip | 本次修复 | 对应用例 |
+| REG-93 | 公开 Release 前校验 `desktop-todo_<ver>-setup.exe` 与 `desktop-todo_<ver>.exe` 两个资产 | 本次修复 | `.github/workflows/release.yml` |
+| REG-94 | 任务栏取消不回滚、托盘惰性重建、卸载清理自启项、list_todos 只读不隔离、DSH 配置原子写、旧收件箱迁移兜底、DNS 解析失败报错、`allow_local` 只允许自定义天气 host、双击/非字符串 id/输入法/GPS 竞态/断网悬浮信息 | 本次修复 | Rust 单测 + REG-43 + 人工手测 |
+| REG-95 | 拖动主界面进入边缘后开始计时；超时若左键仍按下不收起，松开鼠标后才按最终位置收起 | 本次修复 | Rust `left_button_down`；人工按住鼠标拖到上/左/右边缘验证 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

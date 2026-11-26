@@ -60,7 +60,9 @@ foreach ($seg in $parts) {
 }
 $major = [int]$parts[0]
 if ($major -ge 1) {
-  throw "MSIX 版本映射仅支持 0.x.y（当前 $version）；major>=1 后会与历史 1.x.y.0 撞版本，请先更新映射规则"
+  Write-Warning "MSIX 版本映射仅支持 0.x.y（当前 $version）；跳过 MSIX，exe 安装包照常发布"
+  if ($env:GITHUB_OUTPUT) { 'skip=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append }
+  return $null
 }
 if ($major -eq 0) { $major = 1 }  # 商店要求第一段不能为 0
 $msixVersion = '{0}.{1}.{2}.0' -f $major, [int]$parts[1], [int]$parts[2]
@@ -142,7 +144,7 @@ Write-Host "manifest: Identity=$IdentityName Publisher=$Publisher Version=$msixV
 
 # 打包
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$msix = Join-Path $OutDir "DesktopTodo_${version}_x64.msix"
+$msix = Join-Path $OutDir "DesktopTodo_${msixVersion}_x64.msix"
 if (Test-Path $msix) { Remove-Item $msix -Force }
 try {
   & $makeappx pack /d $stage /p $msix /o 2>&1 | ForEach-Object { Write-Host $_ }

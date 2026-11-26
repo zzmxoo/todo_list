@@ -126,7 +126,9 @@ fn quarantine_data_file(path: &Path) -> PathBuf {
     // rename 不修改 mtime；24 小时窗口必须从「隔离时刻」起算，
     // 否则隔天重启或旧文件首次隔离时会立刻过期，被当成全新安装。
     if let Ok(file) = fs::OpenOptions::new().write(true).open(&dst) {
-        let _ = file.set_modified(SystemTime::now());
+        if file.set_modified(SystemTime::now()).is_err() {
+            eprintln!("warning: 无法刷新损坏备份的 mtime：{}", dst.display());
+        }
     }
     dst
 }
@@ -145,14 +147,14 @@ fn corrupt_error(path: &Path, detail: String) -> String {
 
 /// 同目录下是否存在损坏备份。`data.json` 被隔离后路径不存在，
 /// 但这不等于首次安装：只要还有 `.corrupt-*`，就必须继续报错。
-/// 只有 24 小时内的损坏备份才阻止启动。半年前恢复后遗留的 .corrupt-*
-/// 不应让文件缺失（OneDrive 冲突、误移）变成永久只读。
+/// 30 天内的损坏备份才阻止启动。用户可能几天甚至几周才打开一次这个小工具，
+/// 窗口太短会让备份「过期」后静默当全新安装。mtime 取不到时按存在处理。
 fn is_recent_backup(path: &Path) -> bool {
     fs::metadata(path)
         .and_then(|meta| meta.modified())
         .ok()
         .and_then(|time| time.elapsed().ok())
-        .map(|age| age < Duration::from_secs(24 * 60 * 60))
+        .map(|age| age < Duration::from_secs(30 * 24 * 60 * 60))
         .unwrap_or(true)
 }
 
@@ -438,7 +440,7 @@ mod tests {
                     .unwrap_or(false)
             })
             .expect("quarantined backup");
-        let old = SystemTime::now() - Duration::from_secs(25 * 60 * 60);
+        let old = SystemTime::now() - Duration::from_secs(31 * 24 * 60 * 60);
         let file = fs::OpenOptions::new().write(true).open(&corrupt).unwrap();
         file.set_modified(old).unwrap();
         drop(file);

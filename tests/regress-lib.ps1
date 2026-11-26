@@ -11,7 +11,8 @@
 $MIN_REGRESS_LIB_CASES = 6
 $MIN_INTEGRATION_CASES = 49
 $MIN_UNIT_CASES = 49
-$MIN_RUST_CASES = 50
+$MIN_RUST_CASES = 51
+$QUOTE_COUNT = 1313
 
 function Assert-DataFileReadable([string]$path) {
   if (-not (Test-Path -LiteralPath $path)) { return $false }

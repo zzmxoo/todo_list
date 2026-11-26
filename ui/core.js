@@ -144,7 +144,7 @@
     return (Array.isArray(input) ? input : [])
       .filter((todo) => todo && todo.text != null)
       .map((todo) => ({
-        id: todo.id || newTodoId(),
+        id: todo.id == null || todo.id === "" ? newTodoId() : String(todo.id),
         text: String(todo.text),
         done: !!todo.done,
         done_at: todo.done_at || null,

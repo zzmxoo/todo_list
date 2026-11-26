@@ -40,8 +40,11 @@ $buildTime = if (Test-Path (Join-Path $crateDir 'build.rs')) { (Get-Item (Join-P
 $lockTime = if (Test-Path (Join-Path $crateDir 'Cargo.lock')) { (Get-Item (Join-Path $crateDir 'Cargo.lock')).LastWriteTime } else { $null }
 $capDir = Join-Path $crateDir 'capabilities'
 $capTime = if (Test-Path $capDir) { (Get-ChildItem $capDir -Recurse -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime } else { $null }
+$iconTime = if (Test-Path (Join-Path $crateDir 'icons')) { (Get-ChildItem (Join-Path $crateDir 'icons') -Recurse -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime } else { $null }
+$cargoCfg = Join-Path $crateDir '.cargo\config.toml'
+$cargoCfgTime = if (Test-Path $cargoCfg) { (Get-Item $cargoCfg).LastWriteTime } else { $null }
 $scriptTime = (Get-Item $PSCommandPath).LastWriteTime
-$newer = @($confTime, $uiTime, $srcTime, $cargoTime, $buildTime, $lockTime, $capTime, $scriptTime) |
+$newer = @($confTime, $uiTime, $srcTime, $cargoTime, $buildTime, $lockTime, $capTime, $iconTime, $cargoCfgTime, $scriptTime) |
   Where-Object { $_ } |
   Sort-Object -Descending | Select-Object -First 1
 $stampPath = Join-Path $targetDir 'build-stamp.json'

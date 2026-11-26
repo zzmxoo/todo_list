@@ -51,6 +51,7 @@ jobs:
         shell: pwsh
         working-directory: src-tauri
         run: |
+          . ../tests/regress-lib.ps1
           $out = cargo test --release 2>&1
           $code = $LASTEXITCODE
           $out | Write-Host
@@ -61,8 +62,8 @@ jobs:
             Write-Host "::error::cargo test exit $code"
             exit 1
           }
-          if ($n -lt 50) {
-            Write-Host "::error::Rust 单测只有 $n 条，expected at least 50"
+          if ($n -lt $MIN_RUST_CASES) {
+            Write-Host "::error::Rust 单测只有 $n 条，expected at least $MIN_RUST_CASES"
             exit 1
           }
 
@@ -104,7 +105,13 @@ jobs:
             exit 0
           }
           ./tests/build-msix.ps1 -IdentityName $id -Publisher $pub -PublisherDisplayName $pd
-          $msix = Get-ChildItem src-tauri/target/msix/*.msix | Select-Object -First 1
+          $msix = Get-ChildItem src-tauri/target/msix/*.msix -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msix) {
+            Write-Host "::warning::未生成 MSIX，跳过上传"
+            "skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
           "path=$($msix.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: 上传 MSIX 到 Release
@@ -117,6 +124,22 @@ jobs:
           gh release upload $env:GITHUB_REF_NAME $env:MSIX_PATH --clobber
 
       # 所有资产上传成功后再公开；中途失败时 Release 保持草稿，可直接重跑同一 tag。
+      - name: 校验发布资产
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $required = @("desktop-todo_$version-setup.exe", "desktop-todo_$version.exe")
+          $release = gh release view $env:GITHUB_REF_NAME --json assets | ConvertFrom-Json
+          $names = @($release.assets | ForEach-Object { $_.name })
+          foreach ($name in $required) {
+            if ($names -notcontains $name) {
+              Write-Host "::error::Release 缺少资产 $name"
+              exit 1
+            }
+          }
+
       - name: 公开 Release
         shell: pwsh
         env:

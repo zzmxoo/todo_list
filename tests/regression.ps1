@@ -177,6 +177,15 @@ try {
     try { Invoke-RestMethod "http://127.0.0.1:$Port/json" | Out-Null; $ready = $true; break } catch { }
   }
   if (-not $ready) { throw "CDP port $Port not ready after 15s" }
+  $appTarget = $false
+  for ($i = 0; $i -lt 20 -and -not $appTarget; $i++) {
+    Start-Sleep -Milliseconds 200
+    $targets = Invoke-RestMethod "http://127.0.0.1:$Port/json"
+    $appTarget = [bool]($targets | Where-Object { $_.url -match 'index\.html\?test=1' })
+  }
+  if (-not $appTarget) {
+    throw "端口 $Port 被其它进程占用（未找到本应用的 ?test=1 页面）"
+  }
 
   if (-not $SkipUnits) {
     # 自动发现 unit-*.js，避免新增文件只在一处登记、另一处静默漏跑。
@@ -210,7 +219,7 @@ fetch('quotes.json')
 '@
     $quotes = (Eval-Expr $quotesExpr) | ConvertFrom-Json
     "QUOTES total=$($quotes.total) unique=$($quotes.unique) dup=$($quotes.dup) badLen=$($quotes.badLen) badAuthor=$($quotes.badAuthor)"
-    if ($quotes.total -eq 1313 -and $quotes.dup -eq 0 -and $quotes.badLen -eq 0 -and $quotes.badAuthor -eq 0) {
+    if ($quotes.total -eq $QUOTE_COUNT -and $quotes.dup -eq 0 -and $quotes.badLen -eq 0 -and $quotes.badAuthor -eq 0) {
       $passed += 1
       $extraCases += 1
     } else {
@@ -290,12 +299,15 @@ finally {
     $stillRunning = $true
     $failed += 1
     "FAIL  停止进程失败：$($_.Exception.Message)"
-    if ($backupCreated) {
-      "      数据备份仍在 $backup；恢复后可能被运行中的实例覆盖，请人工确认"
-    }
   }
-  # 只恢复本次实际创建的备份；New-UserDataBackup 失败时绝不碰用户数据。
-  if ($backupCreated) {
+  # 进程仍存活时绝不恢复：运行中的实例会用内存里的测试数据覆盖回去，
+  # 而 Restore-UserDataBackup 会删掉唯一备份。保留一份 .keep 副本并让人工处理。
+  if ($stillRunning) {
+    if ($backupCreated) {
+      Copy-Item -LiteralPath $backup -Destination "$backup.keep" -Force
+      "      备份已另存为 $backup.keep；请先结束 desktop-todo 进程，再把备份改回 data.json"
+    }
+  } elseif ($backupCreated) {
     try {
       $null = Restore-UserDataBackup $data $backup
     } catch {

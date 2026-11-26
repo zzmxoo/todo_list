@@ -42,6 +42,25 @@ fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), Str
     ai::write_json_atomic(&path, &state)
 }
 
+/// 全局左键状态：窗口拖动期间 DOM 可能收不到 pointerdown，
+/// 边缘收起必须问系统，避免“鼠标还没松就缩进去”。
+#[tauri::command]
+fn left_button_down() -> bool {
+    #[cfg(windows)]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetAsyncKeyState(key: i32) -> i16;
+        }
+        const VK_LBUTTON: i32 = 0x01;
+        unsafe { (GetAsyncKeyState(VK_LBUTTON) as u16 & 0x8000) != 0 }
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 /// 设置页「AI 接入」使用：返回当前 exe 路径和可直接复制的配置片段。
 #[tauri::command]
 fn get_ai_setup() -> Result<serde_json::Value, String> {
@@ -203,9 +222,27 @@ fn is_blocked_host(url: &reqwest::Url) -> bool {
         .unwrap_or(false)
 }
 
+/// 仅允许自定义天气接口访问本机/内网：从 data.json 里取用户填写的 host 作为白名单。
+fn custom_weather_host(app: &tauri::AppHandle) -> Option<String> {
+    let dir = data_dir(app).ok()?;
+    let text = fs::read_to_string(dir.join("data.json")).ok()?;
+    let root: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let api = root.get("settings")?.get("weather_api")?.as_str()?.trim();
+    let after = api.split("://").nth(1)?;
+    let hostport = after.split(['/', '?', '#']).next()?;
+    let hostport = hostport.rsplit('@').next()?;
+    let host = hostport.split(':').next()?.trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_ascii_lowercase())
+    }
+}
+
 /// 代用户请求接口，绕开 WebView 的跨域限制。
 #[tauri::command]
 async fn fetch_json(
+    app: tauri::AppHandle,
     url: String,
     allow_local: Option<bool>,
 ) -> Result<serde_json::Value, String> {
@@ -216,6 +253,13 @@ async fn fetch_json(
     }
     // 只有用户在「自定义天气接口」里明确填写的地址才允许本机/内网，
     // 其余调用方（定位、节假日、公共天气）仍按 SSRF 面收口。
+    if allow_local {
+        let allowed = custom_weather_host(&app);
+        let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+        if allowed.as_deref() != Some(host.as_str()) {
+            return Err("只允许访问自定义天气接口的地址".into());
+        }
+    }
     if !allow_local && is_blocked_host(&parsed) {
         return Err("不允许访问本机或内网地址".into());
     }
@@ -244,16 +288,17 @@ async fn fetch_json(
     {
         if let Some(host) = parsed.host_str() {
             let port = parsed.port_or_known_default().unwrap_or(443);
-            if let Ok(addrs) = tokio::net::lookup_host((host, port)).await {
-                let pinned: Vec<std::net::SocketAddr> = addrs.collect();
-                for addr in &pinned {
-                    if ip_blocked(addr.ip()) {
-                        return Err("不允许访问本机或内网地址".into());
-                    }
+            let addrs = tokio::net::lookup_host((host, port))
+                .await
+                .map_err(|_| "解析域名失败".to_string())?;
+            let pinned: Vec<std::net::SocketAddr> = addrs.collect();
+            for addr in &pinned {
+                if ip_blocked(addr.ip()) {
+                    return Err("不允许访问本机或内网地址".into());
                 }
-                for addr in pinned {
-                    builder = builder.resolve(host, addr);
-                }
+            }
+            for addr in pinned {
+                builder = builder.resolve(host, addr);
             }
         }
     }
@@ -335,6 +380,18 @@ fn autostart_delete_args() -> Vec<String> {
     ]
 }
 
+/// reg.exe 的输出走 OEM 代码页，中文路径可能被 from_utf8_lossy 变成 U+FFFD；
+/// 整路径匹配失败时退化为文件名匹配（文件名是 ASCII，不受编码影响）。
+fn autostart_output_matches(stdout: &str, exe: &std::path::Path) -> bool {
+    let actual = stdout.to_ascii_lowercase();
+    let expected = exe.to_string_lossy().to_ascii_lowercase();
+    let name = exe
+        .file_name()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    actual.contains(&expected) || (!name.is_empty() && actual.contains(&name))
+}
+
 /// 固定使用系统目录下的 reg.exe，避免 PATH / 工作目录被替换。
 fn reg_exe() -> PathBuf {
     std::env::var_os("SystemRoot")
@@ -414,9 +471,8 @@ async fn get_autostart() -> Result<bool, String> {
         }
         // 值存在但指向旧路径/已删除的 exe 时，登录自启不会生效，开关应显示关闭。
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let expected = exe.to_string_lossy().to_ascii_lowercase();
-        let actual = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-        return Ok(actual.contains(&expected));
+        let actual = String::from_utf8_lossy(&output.stdout);
+        return Ok(autostart_output_matches(&actual, &exe));
     }
     #[cfg(not(windows))]
     {
@@ -567,10 +623,14 @@ fn set_taskbar_hidden(
     enabled: bool,
 ) -> Result<(), String> {
     if enabled {
-        // 先让托盘图标出现，再隐藏任务栏；任一步失败都回滚，避免「两头都没有」。
-        let tray = app
-            .tray_by_id(TRAY_ID)
-            .ok_or("托盘创建失败，无法隐藏任务栏；请重启程序后重试")?;
+        // 托盘缺失时先尝试重新创建一次；仍然失败才拒绝隐藏任务栏。
+        let tray = if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            tray
+        } else {
+            build_tray(&app).map_err(|e| format!("托盘重建失败：{e}"))?;
+            app.tray_by_id(TRAY_ID)
+                .ok_or("托盘创建失败，无法隐藏任务栏；请重启程序后重试")?
+        };
         tray.set_visible(true).map_err(|e| e.to_string())?;
         if let Err(err) = window.set_skip_taskbar(true) {
             let _ = tray.set_visible(false);
@@ -581,7 +641,9 @@ fn set_taskbar_hidden(
             .set_skip_taskbar(false)
             .map_err(|e| e.to_string())?;
         if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            tray.set_visible(false).map_err(|e| e.to_string())?;
+            if let Err(err) = tray.set_visible(false) {
+                eprintln!("hide tray failed: {err}");
+            }
         }
     }
     Ok(())
@@ -688,6 +750,7 @@ fn main() {
             save_state,
             get_ai_setup,
             reveal_data_dir,
+            left_button_down,
             drain_ai_todos,
             pick_image,
             export_text,
@@ -766,6 +829,15 @@ mod tests {
         assert!(args.contains(&AUTOSTART_KEY.to_string()));
         assert!(args.contains(&AUTOSTART_NAME.to_string()));
         assert_eq!(args.last().map(String::as_str), Some("/f"));
+    }
+
+    #[test]
+    fn autostart_output_falls_back_to_ascii_file_name() {
+        let exe = PathBuf::from(r"C:\Users\lenovo\AppData\Local\桌面待办\desktop-todo.exe");
+        // 模拟 reg.exe 在 OEM 代码页下把中文路径解成 U+FFFD 的输出
+        let stdout = "DesktopTodo    REG_SZ    \"C:\\Users\\lenovo\\AppData\\Local\\���\\desktop-todo.exe\"";
+        assert!(autostart_output_matches(stdout, &exe));
+        assert!(!autostart_output_matches("DesktopTodo REG_SZ \"C:\\Other\\foo.exe\"", &exe));
     }
 
     #[test]

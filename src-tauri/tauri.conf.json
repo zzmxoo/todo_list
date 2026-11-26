@@ -46,7 +46,8 @@
     "icon": ["icons/icon.ico"],
     "windows": {
       "nsis": {
-        "languages": ["SimpChinese"]
+        "languages": ["SimpChinese"],
+        "installerHooks": "nsis/hooks.nsh"
       }
     }
   }

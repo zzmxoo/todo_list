@@ -369,6 +369,7 @@
       await sleep(120);
       const scrollBefore = list.scrollTop;
       const canScroll = scrollBefore > 0;
+      if (!canScroll) return 'skip: list not scrollable';
       const target = findRow(names[0]);
       target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
       let input = null;
@@ -377,13 +378,15 @@
         input = $('.edit-input');
       }
       ok(input, 'edit input');
+      input.focus();
       input.value = 'ITEST-编辑中';
       input.dispatchEvent(new Event('input', { bubbles: true }));
+      ok($('.edit-input'), 'edit input still active before re-render');
 
       window.__TEST_RENDER_TODOS();
-      await sleep(150);
+      const keptWait = await waitFor(() => $('.edit-input'), 1500, 50);
       const kept = $('.edit-input');
-      ok(kept, 'edit input preserved after re-render');
+      ok(keptWait >= 0 && kept, 'edit input preserved after re-render');
       eq(kept.value, 'ITEST-编辑中', 'edit value preserved');
       if (canScroll) {
         ok(
@@ -934,22 +937,19 @@
 
     // 各服务解析器能吃自己的响应结构
     const bdc = ip.find((s) => s.name === 'bigdatacloud');
-    if (bdc) {
-      eq(bdc.city({ city: '杭州市', principalSubdivision: '浙江省' }), '杭州市', 'bdc city');
-    }
+    ok(bdc, 'bigdatacloud source');
+    eq(bdc.city({ city: '杭州市', principalSubdivision: '浙江省' }), '杭州市', 'bdc city');
     const ipapi = ip.find((s) => s.name === 'ip-api');
-    if (ipapi) {
-      eq(ipapi.city({ status: 'success', city: '杭州', regionName: '浙江' }), '杭州', 'ip-api city');
-      eq(ipapi.city({ status: 'fail' }), '', 'ip-api failure -> empty');
-    }
+    ok(ipapi, 'ip-api source');
+    eq(ipapi.city({ status: 'success', city: '杭州', regionName: '浙江' }), '杭州', 'ip-api city');
+    eq(ipapi.city({ status: 'fail' }), '', 'ip-api failure -> empty');
     const nomi = rev.find((s) => s.name === 'nominatim');
-    if (nomi) {
-      eq(
-        nomi.city({ display_name: '拱墅区, 杭州市, 浙江省, 中国', address: {} }),
-        '杭州市',
-        'nominatim extracts city'
-      );
-    }
+    ok(nomi, 'nominatim source');
+    eq(
+      nomi.city({ display_name: '拱墅区, 杭州市, 浙江省, 中国', address: {} }),
+      '杭州市',
+      'nominatim extracts city'
+    );
     return `ip=${ip.map((s) => s.name).join(',')} reverse=${rev.map((s) => s.name).join(',')}`;
   });
 
@@ -1013,9 +1013,9 @@
     }
     ok(target, 'no solar term in next year');
     const reached = await goMonth(target.y, target.m);
-    if (!reached) return 'skip: month not reachable';
+    ok(reached, 'solar term month reachable');
     const cell = $$('.cal-cell').find((c) => c.dataset.date === target.date);
-    if (!cell) return 'skip: date not in view';
+    ok(cell, 'solar term cell rendered');
     cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await sleep(100);
     eq($('#ciTerm').textContent, target.term);
@@ -1040,7 +1040,10 @@
       click($('#calNext'));
       await sleep(550);
     }
-    if (!found) return 'skip: no multi-day holiday data';
+    if (!found) {
+      if (navigator.onLine === false) return 'skip: offline, no holiday data';
+      ok(false, 'no multi-day holiday cell rendered');
+    }
     const cells = $$('.cal-cell.holiday');
     ok(cells.length >= 2, 'holiday cells');
     const names = {};
@@ -1116,7 +1119,7 @@
       ok(infoFires(), '4xx must not disable hover info');
       await sleep(1400);
 
-      // 2) 网络错误：应识别为断网，悬浮信息停用
+      // 2) 网络错误：天气应停用，但农历/节气/名言等本地信息仍要弹出
       mode = 'network';
       if (input) {
         input.value = '成都';
@@ -1124,7 +1127,8 @@
         await waitFor(() => (($('#wcStatus') || {}).textContent || '').includes('连接失败'), 20000, 250);
       }
       await sleep(300);
-      ok(!infoFires(), 'network error must disable hover info');
+      ok(infoFires(), 'network error must keep local hover info');
+      ok($('#ciWeather').hidden, 'weather row hidden when offline');
 
       // 恢复
       mode = null;

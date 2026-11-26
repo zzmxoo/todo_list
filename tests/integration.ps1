@@ -75,6 +75,15 @@ try {
     try { Invoke-RestMethod "http://127.0.0.1:$Port/json" | Out-Null; $ready = $true; break } catch { }
   }
   if (-not $ready) { throw "CDP port $Port not ready after 15s - test exe may not have debug port" }
+  $appTarget = $false
+  for ($i = 0; $i -lt 20 -and -not $appTarget; $i++) {
+    Start-Sleep -Milliseconds 200
+    $targets = Invoke-RestMethod "http://127.0.0.1:$Port/json"
+    $appTarget = [bool]($targets | Where-Object { $_.url -match 'index\.html\?test=1' })
+  }
+  if (-not $appTarget) {
+    throw "端口 $Port 被其它进程占用（未找到本应用的 ?test=1 页面）"
+  }
 
   $expr = Get-Content (Join-Path $PSScriptRoot 'integration-page.js') -Raw -Encoding UTF8
   $tempPath = $env:TEMP
@@ -118,10 +127,16 @@ try {
     Stop-App
   } catch {
     $stillRunning = $true
-    Write-Warning "停止进程失败：$($_.Exception.Message)；恢复后可能被运行中的实例覆盖"
+    $failed += 1
+    Write-Warning "停止进程失败：$($_.Exception.Message)"
   }
-  # 只恢复本次实际创建的备份；备份守卫失败时绝不碰用户数据。
-  if ($backupCreated) {
+  # 进程仍存活时不恢复，保留独立副本供人工处理。
+  if ($stillRunning) {
+    if ($backupCreated) {
+      Copy-Item -LiteralPath $backup -Destination "$backup.keep" -Force
+      Write-Warning "数据未恢复；备份已另存为 $backup.keep，请先结束 desktop-todo 进程"
+    }
+  } elseif ($backupCreated) {
     try {
       $null = Restore-UserDataBackup $data $backup
     } catch {
@@ -165,5 +180,6 @@ try {
   try { $regressionMutex.ReleaseMutex() } catch { }
   $regressionMutex.Dispose()
   if ($restoreFailed) { throw "恢复用户数据失败，备份保留在 $backup" }
+  if ($stillRunning) { throw "desktop-todo 进程未停止，数据未恢复；备份见 $backup.keep" }
   if ($registryRestoreFailed) { throw "恢复开机启动注册表失败，请检查 HKCU Run\DesktopTodo" }
 }

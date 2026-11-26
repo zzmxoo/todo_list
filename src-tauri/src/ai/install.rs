@@ -166,7 +166,12 @@ pub fn install_dsh(home: &Path, exe: &Path) -> Result<String, String> {
         ));
     }
     let target = dsh.join("desktop-todo.mcp.yml");
-    fs::write(&target, text).map_err(|e| e.to_string())?;
+    let tmp = target.with_extension("yml.tmp");
+    fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    if !super::atomic_replace(&tmp, &target) {
+        let _ = fs::remove_file(&tmp);
+        return Err("写入 DSH 配置失败".into());
+    }
     Ok(format!(
         "已生成 {}\n请把文件中的条目合并到 ~/.dsh/profiles/web/cordis.patch.yml，然后重启 dsh。",
         target.display()

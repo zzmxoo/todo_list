@@ -78,7 +78,21 @@ pub fn inbox_dir(dir: &Path) -> Result<PathBuf, String> {
                 }
                 let dst = path.join(entry.file_name());
                 if !dst.exists() {
-                    let _ = fs::rename(&src, &dst);
+                    if fs::rename(&src, &dst).is_err() {
+                        // 跨卷/权限场景 rename 会失败，copy 成功后再删源。
+                        match fs::copy(&src, &dst) {
+                            Ok(_) => {
+                                let _ = fs::remove_file(&src);
+                            }
+                            Err(err) => {
+                                eprintln!(
+                                    "warning: 迁移旧收件箱失败 {} -> {}: {err}",
+                                    src.display(),
+                                    dst.display()
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }

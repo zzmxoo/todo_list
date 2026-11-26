@@ -64,7 +64,7 @@ if ($unitPassed -lt $MIN_UNIT_CASES) {
   "FAIL  单元测试只有 $unitPassed 条，expected at least $MIN_UNIT_CASES"
   $exitCode = 1
 }
-if ($failed -gt 0 -or $quotes.total -ne 1313 -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
+if ($failed -gt 0 -or $quotes.total -ne $QUOTE_COUNT -or $quotes.dup -ne 0 -or $quotes.badLen -ne 0 -or $quotes.badAuthor -ne 0) {
   $exitCode = 1
 }
 try { $regressionMutex.ReleaseMutex() } catch { }

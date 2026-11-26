@@ -275,6 +275,7 @@
   // 收起/进入动画的代际：弹出或清除会递增，过期的动画收尾必须直接放弃，
   // 否则会把 edge-hidden 挂回已经弹开的窗口（内容全透明、窗口还在动）。
   let edgeConcealGen = 0;
+  let edgeDeferToken = 0;
   let edgeShowing = false;
   let edgeAnimToken = 0;
   let pendingAnimStart = null;
@@ -1270,6 +1271,8 @@
       edgeShowing = false;
       els.app.classList.remove("edge-showing");
       resetEdgeTransform();
+      // 收起期间被 doLayout 跳过的布局，弹出后补跑一次。
+      scheduleLayout();
     }
   }
 
@@ -1375,6 +1378,40 @@
     };
   }
 
+  async function leftHeld() {
+    try {
+      return await invoke("left_button_down");
+    } catch (err) {
+      return pointerDown;
+    }
+  }
+
+  // 超时到达边缘但左键仍按着：等松开再收起；期间窗口被拖走则按最新位置重算。
+  async function deferEdgeHide(edge) {
+    const token = ++edgeDeferToken;
+    while (token === edgeDeferToken) {
+      if (!(await leftHeld())) break;
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    if (token !== edgeDeferToken || !win) return;
+    if (edge === "top") {
+      try {
+        const p = await win.outerPosition();
+        const s = await win.outerSize();
+        const rr = pickMonitor(p, s, await monitorList());
+        if (rr && p.y <= rr.y + 8) {
+          await enterEdgeHide("top", rr, p, s);
+        } else {
+          await handleMoveSettled();
+        }
+      } catch (err) {
+        /* ignore */
+      }
+      return;
+    }
+    await handleMoveSettled();
+  }
+
   async function handleMoveSettled() {
     if (!win || settingsOpen || edgeAnimating) return;
     await refreshMonitorBounds();
@@ -1424,14 +1461,18 @@
       return;
     }
 
-    // 拖到上边缘并保持 2 秒：向上隐藏
-    if (pointerDown && pos.y <= r.y + 8) {
+    // 拖到上边缘并保持 2 秒：向上隐藏（鼠标仍按着时等松开再收）
+    if ((pointerDown || (await leftHeld())) && pos.y <= r.y + 8) {
       if (!topDwellSince) {
         topDwellSince = Date.now();
         clearTimeout(topDwellTimer);
         topDwellTimer = setTimeout(async () => {
-          if (!pointerDown || edgeHide) return;
+          if (edgeHide) return;
           try {
+            if (await leftHeld()) {
+              await deferEdgeHide("top");
+              return;
+            }
             const p = await win.outerPosition();
             const s = await win.outerSize();
             const rr = pickMonitor(p, s, await monitorList());
@@ -1471,6 +1512,11 @@
       }
     }
     if (edge) {
+      // 鼠标仍按着时先不收起，等松开后按最终位置再判断。
+      if (await leftHeld()) {
+        await deferEdgeHide(edge);
+        return;
+      }
       await enterEdgeHide(edge, r, pos, size);
       return;
     }
@@ -1922,6 +1968,7 @@
     };
 
     input.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
         event.preventDefault();
         finish(true);
@@ -1958,6 +2005,7 @@
     };
 
     input.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
         event.preventDefault();
         finish(true);
@@ -2554,8 +2602,6 @@
   }
 
   function showCalInfo(cell, date) {
-    // 断网或天气请求已确认失败（例如程序被禁止联网）时不弹框。
-    if (navigator.onLine === false || networkOk === false) return;
     if (hoverCell !== cell || !cell.isConnected) return;
 
     const key = ymd(date);
@@ -2576,7 +2622,8 @@
       els.ciTerm.hidden = true;
     }
 
-    const dayWeather = weatherForLocalDay(key);
+    const offline = navigator.onLine === false || networkOk === false;
+    const dayWeather = offline ? null : weatherForLocalDay(key);
     if (dayWeather) {
       const info = wmoInfo(dayWeather.code);
       els.ciWIcon.innerHTML = wxIcon(info.kind, 13);
@@ -2971,7 +3018,7 @@
             setWcStatus("");
             refreshWeather();
             // 2) GPS 仅用于提升坐标精度，失败不影响已有结果
-            refineWithGps();
+            refineWithGps(token);
             return;
           }
         } catch (err) {
@@ -2984,10 +3031,11 @@
   }
 
   /** 用 GPS 提升坐标精度。已有城市名时只更新坐标，不改城市名。 */
-  function refineWithGps() {
+  function refineWithGps(token) {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        if (token !== locateToken) return;
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
         // 坐标变化很小就不必重拉天气
@@ -3059,7 +3107,10 @@
       if (
         Number(state.settings.latitude) !== lat ||
         Number(state.settings.longitude) !== lon ||
-        (state.settings.city && state.settings.city !== "定位中")
+        (state.settings.city &&
+          state.settings.city !== "定位中" &&
+          state.settings.city !== "当前位置" &&
+          state.settings.city !== DEFAULT_SETTINGS.city)
       ) {
         return;
       }
@@ -3191,10 +3242,11 @@
     });
 
     els.todoList.addEventListener("dblclick", (event) => {
-      // 双击行内按钮不能变成下一行的改名框。
+      // 双击行内按钮不能变成下一行的改名框；同一行上的编辑仍然允许。
       if (event.target.closest(".act-btn")) return;
-      if (event.target.closest(".edit-input")) return;
       const row = event.target.closest(".todo-row");
+      if (row && Date.now() - lastAct.at < 600 && row.dataset.id !== lastAct.id) return;
+      if (event.target.closest(".edit-input")) return;
       if (!row) return;
       const todo = findTodo(row.dataset.id);
       if (todo) startEdit(row, todo);
@@ -3621,10 +3673,15 @@
         els.weatherApiInput.blur();
       }
     });
-    els.weatherApiInput.addEventListener("change", () => {
+    els.weatherApiInput.addEventListener("change", async () => {
       state.settings.weather_api = els.weatherApiInput.value.trim();
       state.weather = null;
-      save();
+      try {
+        // 后端用 data.json 里的 weather_api 做本机/内网白名单，先落盘再请求。
+        await flushSave();
+      } catch (err) {
+        console.warn("save weather api failed", err);
+      }
       renderWeatherCard();
       refreshWeather();
     });
