@@ -250,7 +250,7 @@
   // data.json 读取失败后停止任何写盘：坏文件已被后端改名保留，
   // 此时再保存会生成一份只有默认值的新文件，让用户误以为数据被清空。
   let loadFailed = false;
-  let undoTodoId = null;
+  let undoAction = null;
   let undoTimer = null;
   let lastAct = { id: "", at: 0, x: 0, y: 0 };
   let locateToken = 0;
@@ -258,6 +258,7 @@
   let calPress = null;
   let monthCursor = null;
   let weatherBusy = false;
+  let weatherDirty = false;
   let weatherFailed = false;
   let weatherRetryTimer = null;
   const WEATHER_RETRY_MS = 30 * 1000;
@@ -315,19 +316,9 @@
 
   // 预报接口返回的是城市所在时区的日期；日历按本地日期显示。
   // 用「第 i 天」映射到本地今天 + i，避免跨时区时键对不上、日历格没有天气。
-  function localWeatherDayKey(index) {
-    const d = new Date();
-    d.setHours(12, 0, 0, 0);
-    d.setDate(d.getDate() + index);
-    return ymd(d);
-  }
-
   function weatherForLocalDay(key) {
-    const daily = state.weather?.daily || [];
-    for (let i = 0; i < daily.length; i += 1) {
-      if (localWeatherDayKey(i) === key) return daily[i];
-    }
-    return null;
+    // 日历格显示接口返回的日期；缓存隔夜后仍按日期对齐，不按数组下标错位。
+    return (state.weather?.daily || []).find((day) => day && day.date === key) || null;
   }
 
   function toFileUrl(path) {
@@ -587,6 +578,8 @@
     els.loadError.hidden = false;
     els.loadError.dataset.reason = "load";
     if (els.addRow) els.addRow.classList.add("disabled");
+    if (els.weatherPill) els.weatherPill.disabled = true;
+    hideUndo();
     const body = els.settingsPanel && els.settingsPanel.querySelector(".settings-body");
     if (body) {
       body.inert = true;
@@ -985,15 +978,16 @@
   async function refreshMonitorBounds() {
     const monitors = await monitorList();
     if (!monitors.length) return;
-    let rect = null;
+    let pos = null;
+    let size = null;
     try {
-      rect = await getWindowRect();
+      // pickMonitor 与 availableMonitors 都是物理像素，不能喂逻辑 rect。
+      pos = await win.outerPosition();
+      size = await win.outerSize();
     } catch (err) {
       /* ignore */
     }
-    const picked = rect
-      ? pickMonitor(rect, { width: rect.w, height: rect.h }, monitors)
-      : null;
+    const picked = pos && size ? pickMonitor(pos, size, monitors) : null;
     const r = picked || (monitors[0] ? monitorRect(monitors[0]) : null);
     if (!r) return;
     // 单屏优先用工作区（逻辑像素，已排除任务栏）；多屏用当前窗口缩放换算。
@@ -1008,12 +1002,15 @@
       };
       return;
     }
-    let scale = 1;
-    try {
-      scale = (await win.scaleFactor()) || 1;
-    } catch (err) {
-      /* ignore */
-    }
+    const mon =
+      monitors.find(
+        (item) =>
+          item.position.x === r.x &&
+          item.position.y === r.y &&
+          item.size.width === r.w &&
+          item.size.height === r.h
+      ) || monitors[0];
+    const scale = Number(mon && mon.scaleFactor) || 1;
     currentMonitorBounds = {
       left: r.x / scale,
       top: r.y / scale,
@@ -1912,14 +1909,19 @@
   function deleteTodo(id) {
     if (loadFailed) return;
     const index = state.todos.findIndex((todo) => todo.id === id);
-    if (index >= 0) state.todos.splice(index, 1);
+    if (index < 0) return;
+    const [removed] = state.todos.splice(index, 1);
     commitTodos();
+    showUndo(`已删除「${removed.text}」`, () => {
+      state.todos.splice(Math.min(index, state.todos.length), 0, removed);
+      commitTodos();
+    });
   }
 
-  function showUndo(id, text) {
+  function showUndo(text, action) {
     if (!els.undoToast) return;
-    undoTodoId = id;
-    els.undoText.textContent = `已完成「${text}」`;
+    undoAction = action;
+    els.undoText.textContent = text;
     els.undoToast.hidden = false;
     clearTimeout(undoTimer);
     undoTimer = setTimeout(hideUndo, 6000);
@@ -1928,18 +1930,14 @@
   function hideUndo() {
     clearTimeout(undoTimer);
     undoTimer = null;
-    undoTodoId = null;
+    undoAction = null;
     if (els.undoToast) els.undoToast.hidden = true;
   }
 
   function undoDone() {
-    if (!undoTodoId) return;
-    const index = state.todos.findIndex((todo) => todo.id === undoTodoId);
-    if (index >= 0 && state.todos[index].done) {
-      state.todos[index] = applyDone(state.todos[index], false);
-      commitTodos();
-    }
+    const action = undoAction;
     hideUndo();
+    if (action) action();
   }
 
   function toggleDone(id) {
@@ -1950,8 +1948,17 @@
     const next = !todo.done;
     state.todos[index] = applyDone(todo, next);
     commitTodos();
-    if (next) showUndo(id, todo.text);
-    else hideUndo();
+    if (next) {
+      showUndo(`已完成「${todo.text}」`, () => {
+        const current = state.todos.findIndex((item) => item.id === id);
+        if (current >= 0 && state.todos[current].done) {
+          state.todos[current] = applyDone(state.todos[current], false);
+          commitTodos();
+        }
+      });
+    } else {
+      hideUndo();
+    }
   }
 
   function togglePin(id) {
@@ -2288,7 +2295,11 @@
   }
 
   async function refreshWeather() {
-    if (weatherBusy) return;
+    if (weatherBusy) {
+      weatherDirty = true;
+      return;
+    }
+    weatherDirty = false;
     const s = state.settings;
     weatherBusy = true;
     try {
@@ -2316,7 +2327,7 @@
       state.weather = await window.WeatherAPI.load(
         url,
         { city: s.city, lat: s.latitude, lon: s.longitude },
-        (target) => invoke("fetch_json", { url: target, allowLocal: !!custom })
+        (target) => invoke("fetch_json", { url: target })
       );
       networkOk = true;
       weatherFailed = 0;
@@ -2349,6 +2360,10 @@
       if (isNetwork) scheduleWeatherRetry();
     } finally {
       weatherBusy = false;
+      if (weatherDirty) {
+        weatherDirty = false;
+        setTimeout(() => refreshWeather(), 0);
+      }
     }
   }
 
@@ -2766,8 +2781,8 @@
     const events = buildEvents(state.todos);
 
     const weatherByDay = new Map();
-    (state.weather?.daily || []).forEach((day, index) => {
-      weatherByDay.set(localWeatherDayKey(index), day);
+    (state.weather?.daily || []).forEach((day) => {
+      weatherByDay.set(day.date, day);
     });
 
     const holidayByDay = buildHolidayMap(state.settings.holidays);

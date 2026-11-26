@@ -234,6 +234,10 @@ fn ip_blocked(ip: std::net::IpAddr) -> bool {
                 || o[0] == 0 // 0.0.0.0/8
                 || (o[0] == 100 && (64..=127).contains(&o[1])) // 100.64/10 CGNAT/云元数据
                 || (o[0] == 198 && (o[1] == 18 || o[1] == 19)) // 198.18/15 基准测试网段
+                || o[0] >= 224 // 224/4 组播 + 240/4 保留
+                || (o[0] == 192 && o[1] == 0 && o[2] == 2) // TEST-NET-1
+                || (o[0] == 198 && o[1] == 51 && o[2] == 100) // TEST-NET-2
+                || (o[0] == 203 && o[1] == 0 && o[2] == 113) // TEST-NET-3
         }
         std::net::IpAddr::V6(ip) => {
             if let Some(v4) = ip.to_ipv4_mapped() {
@@ -244,6 +248,9 @@ fn ip_blocked(ip: std::net::IpAddr) -> bool {
                 || ip.is_unspecified()
                 || (seg[0] & 0xfe00) == 0xfc00 // fc00::/7 unique local
                 || (seg[0] & 0xffc0) == 0xfe80 // fe80::/10 link local
+                || (seg[0] & 0xffc0) == 0xfec0 // fec0::/10 site local (deprecated)
+                || seg[0] == 0x2002 // 6to4
+                || (seg[0] == 0x0064 && seg[1] == 0xff9b) // NAT64 64:ff9b::/96
         }
     }
 }
@@ -268,20 +275,27 @@ fn is_blocked_host(url: &reqwest::Url) -> bool {
 }
 
 /// 仅允许自定义天气接口访问本机/内网：从 data.json 里取用户填写的 host 作为白名单。
-fn custom_weather_host(app: &tauri::AppHandle) -> Option<String> {
+fn custom_weather_url(app: &tauri::AppHandle) -> Option<reqwest::Url> {
     let dir = data_dir(app).ok()?;
-    let text = fs::read_to_string(dir.join("data.json")).ok()?;
-    let root: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let bytes = fs::read(dir.join("data.json")).ok()?;
+    let root: serde_json::Value =
+        serde_json::from_slice(ai::inbox::strip_bom(&bytes)).ok()?;
     let api = root.get("settings")?.get("weather_api")?.as_str()?.trim();
     // 占位符会让 Url::parse 失败；host 部分不含占位符，先去掉花括号再解析。
     let sanitized = api.replace('{', "").replace('}', "");
-    let parsed = reqwest::Url::parse(&sanitized).ok()?;
-    let host = parsed.host_str()?.trim_matches(['[', ']']).trim();
-    if host.is_empty() {
-        None
-    } else {
-        Some(host.to_ascii_lowercase())
-    }
+    reqwest::Url::parse(&sanitized).ok()
+}
+
+fn same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
+    let host = |url: &reqwest::Url| {
+        url.host_str()
+            .unwrap_or("")
+            .trim_matches(['[', ']'])
+            .to_ascii_lowercase()
+    };
+    a.scheme().eq_ignore_ascii_case(b.scheme())
+        && host(a) == host(b)
+        && a.port_or_known_default() == b.port_or_known_default()
 }
 
 /// 代用户请求接口，绕开 WebView 的跨域限制。
@@ -289,46 +303,32 @@ fn custom_weather_host(app: &tauri::AppHandle) -> Option<String> {
 async fn fetch_json(
     app: tauri::AppHandle,
     url: String,
-    allow_local: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    let allow_local = allow_local.unwrap_or(false);
     let parsed = reqwest::Url::parse(&url).map_err(|_| "链接格式不正确".to_string())?;
     if !(parsed.scheme() == "http" || parsed.scheme() == "https") {
         return Err("仅支持 http/https 链接".into());
     }
-    // 只有用户在「自定义天气接口」里明确填写的地址才允许本机/内网，
-    // 其余调用方（定位、节假日、公共天气）仍按 SSRF 面收口。
-    let allowed_host = if allow_local {
-        let allowed = custom_weather_host(&app);
-        let host = parsed
-            .host_str()
-            .unwrap_or("")
-            .trim_matches(['[', ']'])
-            .to_ascii_lowercase();
-        if allowed.as_deref() != Some(host.as_str()) {
-            return Err("只允许访问自定义天气接口的地址".into());
-        }
-        allowed
-    } else {
-        None
-    };
+    // 仅当请求与用户填写的自定义天气接口同源（scheme + host + port）时才允许本机/内网。
+    let allowed = custom_weather_url(&app);
+    let allow_local = allowed
+        .as_ref()
+        .map(|custom| same_origin(custom, &parsed))
+        .unwrap_or(false);
     if !allow_local && is_blocked_host(&parsed) {
         return Err("不允许访问本机或内网地址".into());
     }
     let redirect = if allow_local {
-        // 自定义接口允许跳转，但每一跳都必须仍指向同一个自定义 host。
-        let allow = allowed_host.clone();
+        // 自定义接口允许跳转，但每一跳都必须仍与自定义接口同源。
+        let allow = allowed.clone();
         reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() >= 5 {
                 return attempt.stop();
             }
-            let host = attempt
-                .url()
-                .host_str()
-                .unwrap_or("")
-                .trim_matches(['[', ']'])
-                .to_ascii_lowercase();
-            if allow.as_deref() == Some(host.as_str()) {
+            let same = allow
+                .as_ref()
+                .map(|custom| same_origin(custom, attempt.url()))
+                .unwrap_or(false);
+            if same {
                 attempt.follow()
             } else {
                 attempt.stop()
@@ -340,6 +340,8 @@ async fn fetch_json(
     };
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(12))
+        // 不让环境代理绕过 DNS 钉扎与内网过滤。
+        .no_proxy()
         .redirect(redirect)
         // OSM Nominatim 使用政策要求可识别的 UA；版本号取 Cargo，避免发版后过期
         .user_agent(concat!(
@@ -410,7 +412,10 @@ async fn fetch_json(
     serde_json::from_slice(&body).map_err(|e| format!("数据解析失败：{e}"))
 }
 
+#[cfg(not(feature = "test-data-dir"))]
 const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+#[cfg(feature = "test-data-dir")]
+const AUTOSTART_KEY: &str = r"HKCU\Software\DesktopTodo.Test\Run";
 const AUTOSTART_NAME: &str = "DesktopTodo";
 
 /// 窗口动画缓动：smoothstep，两端速度为 0。

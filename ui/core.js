@@ -40,7 +40,12 @@
       const at = new Date(
         SOLAR_TERM_BASE + SOLAR_TERM_YEAR_MS * (year - 1900) + SOLAR_TERM_INFO[index] * 60000
       );
-      if (at.getUTCFullYear() === year && at.getUTCMonth() === month && at.getUTCDate() === day) {
+      // 交节时刻是绝对时间；必须用本地年月日比较，不能拿 UTC 日期对本地日期。
+      if (
+        at.getFullYear() === year &&
+        at.getMonth() === month &&
+        at.getDate() === day
+      ) {
         return SOLAR_TERMS[index];
       }
     }

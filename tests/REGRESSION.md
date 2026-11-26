@@ -131,6 +131,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-105 | 数据根统一 `~/.desktoptodo` 并迁移；自定义天气 IPv6 归一；`normalize_due` 校验日历合法性；`add_minutes` 支持时区；数字 duration 限 1..1440 | 本次修复 | Rust 单测 + MSIX 真机验证 |
 | REG-106 | MSIX skip 不再导致 CI 硬失败；集成门禁要求实际执行数；断网 REG-11/38 转 skip；REG-36 断言注入发生；REG-44 还原进 finally | 本次修复 | workflow + 对应用例 |
 | REG-107 | 互斥量失败有提示并退 Local；保存前留 `data.json.bak`；收件箱 tmp 带 PID；坏样本带时间戳不覆盖 | 本次修复 | Rust 单测 + 代码审查 |
+| REG-108 | 多屏按物理像素选屏再换算逻辑边界；天气按接口日期映射；weatherBusy 脏标记；删除可撤销；只读禁用天气胶囊；节气按本地日期；自定义天气同源校验；测试自启写独立注册表键 | 本次修复 | REG-45/68 + 人工多屏/撤销验证 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

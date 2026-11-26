@@ -15,7 +15,14 @@ $backup = "$data.itest"
 
 function Stop-App {
   $procs = Get-Process -Name desktop-todo -ErrorAction SilentlyContinue
-  if ($procs) { $procs | Stop-Process -Force -ErrorAction SilentlyContinue }
+  if ($procs) {
+    foreach ($proc in $procs) { $null = $proc.CloseMainWindow() }
+    foreach ($proc in $procs) {
+      try { Wait-Process -Id $proc.Id -Timeout 2 -ErrorAction Stop } catch { }
+    }
+    $procs = Get-Process -Name desktop-todo -ErrorAction SilentlyContinue
+    if ($procs) { $procs | Stop-Process -Force -ErrorAction SilentlyContinue }
+  }
   Start-Sleep -Milliseconds 300
   $left = Get-CimInstance Win32_Process -Filter "Name='desktop-todo.exe'" -ErrorAction SilentlyContinue
   foreach ($proc in $left) {
@@ -82,11 +89,11 @@ try {
   # 启动测试 exe 后等待 CDP 端口就绪（比固定 sleep 更稳）
   Start-Process $exe
   $ready = $false
-  for ($i = 0; $i -lt 30; $i++) {
+  for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
     try { Invoke-RestMethod "http://127.0.0.1:$Port/json" | Out-Null; $ready = $true; break } catch { }
   }
-  if (-not $ready) { throw "CDP port $Port not ready after 15s - test exe may not have debug port" }
+  if (-not $ready) { throw "CDP port $Port not ready after 30s；若已有实例（含管理员启动）在跑，请先结束" }
   $appTarget = $false
   for ($i = 0; $i -lt 20 -and -not $appTarget; $i++) {
     Start-Sleep -Milliseconds 200

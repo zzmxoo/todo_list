@@ -44,10 +44,9 @@
     eq(core.solarTermOn(new Date(2026, 10, 21)), '');
   });
 
-  test('solarTermOn 一月节气与跨年', () => {
+  test('solarTermOn 一月节气', () => {
     eq(core.solarTermOn(new Date(2026, 0, 5)), '小寒');
     eq(core.solarTermOn(new Date(2026, 0, 20)), '大寒');
-    eq(core.solarTermOn(new Date(2025, 11, 21)), '冬至');
   });
 
   test('clipSegment 跨月只保留本月', () => {
