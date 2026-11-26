@@ -249,10 +249,15 @@ fn parse_naive(iso: &str) -> Option<(i32, u32, u32, u32, u32)> {
     ))
 }
 
-/// 在本地 ISO 时间上增加分钟；暂不支持带时区的时间（AI 通常传本地时间）。
+/// 在本地 ISO 时间上增加分钟；带 Z / ±HH:MM 时先剥掉时区再计算。
 pub fn add_minutes(iso: &str, minutes: i64) -> Result<String, String> {
+    let without_z = iso.split('Z').next().unwrap_or(iso);
+    let naive = without_z
+        .get(10..)
+        .and_then(|rest| rest.find(['+', '-']).map(|idx| &without_z[..10 + idx]))
+        .unwrap_or(without_z);
     let (mut year, mut month, mut day, mut hour, mut minute) =
-        parse_naive(iso).ok_or_else(|| format!("时间格式不支持时长计算：{iso}"))?;
+        parse_naive(naive).ok_or_else(|| format!("时间格式不支持时长计算：{iso}"))?;
     let total = hour as i64 * 60 + minute as i64 + minutes;
     let day_delta = total.div_euclid(1440);
     let sod = total.rem_euclid(1440);
@@ -295,6 +300,18 @@ pub fn add_minutes(iso: &str, minutes: i64) -> Result<String, String> {
     ))
 }
 
+fn parse_digits(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0, |acc, b| acc * 10 + (b - b'0') as u32)
+}
+
+fn valid_date_time(year: u32, month: u32, day: u32, hour: u32, minute: u32) -> bool {
+    (1..=12).contains(&month)
+        && day >= 1
+        && day <= days_in_month(year as i32, month)
+        && hour <= 23
+        && minute <= 59
+}
+
 /// 接受 `YYYY-MM-DD`（默认当天 18:00）或 `YYYY-MM-DDTHH:MM[:SS][时区]`。
 pub fn normalize_due(raw: &str) -> Result<String, String> {
     let text = raw.trim();
@@ -306,6 +323,15 @@ pub fn normalize_due(raw: &str) -> Result<String, String> {
         && is_digits(&bytes[5..7])
         && is_digits(&bytes[8..10])
     {
+        if !valid_date_time(
+            parse_digits(&bytes[0..4]),
+            parse_digits(&bytes[5..7]),
+            parse_digits(&bytes[8..10]),
+            18,
+            0,
+        ) {
+            return Err(format!("due 不是合法日期：{raw}"));
+        }
         return Ok(format!("{text}T18:00:00"));
     }
     let text = text.replacen(' ', "T", 1);
@@ -322,6 +348,15 @@ pub fn normalize_due(raw: &str) -> Result<String, String> {
         && is_digits(&bytes[11..13])
         && is_digits(&bytes[14..16]);
     if !shape_ok {
+        return Err(format!("due 不是合法时间：{raw}"));
+    }
+    if !valid_date_time(
+        parse_digits(&bytes[0..4]),
+        parse_digits(&bytes[5..7]),
+        parse_digits(&bytes[8..10]),
+        parse_digits(&bytes[11..13]),
+        parse_digits(&bytes[14..16]),
+    ) {
         return Err(format!("due 不是合法时间：{raw}"));
     }
     if bytes.len() == 16 {
@@ -389,6 +424,11 @@ pub fn normalize(provider_hint: &str, input: &Value) -> Result<AiTodo, String> {
                 break;
             }
             Some(_) => return Err(format!("{field} 必须是分钟数或时长文本")),
+        }
+    }
+    if let Some(minutes) = duration {
+        if !(1..=1440).contains(&minutes) {
+            return Err("duration 必须在 1 到 1440 分钟之间".into());
         }
     }
 
@@ -575,7 +615,10 @@ mod tests {
             normalize_due("2026-11-25T08:30:45+08:00").unwrap(),
             "2026-11-25T08:30:45+08:00"
         );
-        assert!(normalize_due("2026-02-30 08:30").is_ok()); // shape 校验，不负责日历合法性
+        assert!(normalize_due("2026-02-30 08:30").is_err());
+        assert!(normalize_due("2026-13-01").is_err());
+        assert!(normalize_due("2026-12-01 24:00").is_err());
+        assert!(normalize_due("2024-02-29").is_ok());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# 回归测试集
+﻿# 回归测试集
 
 本文件是回归用例的**清单**：每个已修复的问题、每条必须长期保持的行为，都要能在这里找到对应的自动化用例。
 `tests/integration-page.js` 中的用例名直接带 `[REG-xx]` 编号，方便从失败项反查历史问题。
@@ -68,7 +68,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-36 | 保存失败（断网 / 磁盘异常）不能丢待办：内存保留，恢复后自动补写落盘 | 本次修复 | 保存失败不能丢待办：内存状态保留，恢复后下一次保存完整落盘 |
 | REG-38 | 天气错误分类：HTTP 4xx 不算断网（不能因此停用日历悬浮信息），网络错误才算并触发重试 | 本次修复 | 天气错误分类：HTTP 4xx 不算断网，网络错误才算 |
 | REG-39 | 名言库不含贬义 / 嘲讽 / 粗俗语句 | 本次修复 | 名言库不含贬义 / 嘲讽 / 粗俗语句 |
-| REG-37 | 节日底色整体偏暖、明度充足，不用冷色与阴暗色（清明节保留清冷竹青） | 本次修复 | 见下方单元用例 |
+| REG-37 | 大节日柔和暖色，小节日（清明/端午/中秋）与未知节日低饱和竹青；不用高饱和或阴暗色 | 本次修复 | 见下方单元用例 |
 | REG-46 | data.json 损坏时不能静默清空：原文件改名保留为 `data.json.corrupt-*`；重启时检测到该备份仍报错，不当作全新安装；本次不写盘，前端显示告警并停止保存 | 本次修复 | Rust `ai::inbox::tests`（drain 二次调用 / 重启读取 / save 守卫）；`regression.ps1` 端到端用例；前端 `loadFailed` 分支 |
 | REG-47 | 回归脚本不能用测试数据覆盖用户数据：残留备份（含另一套脚本的 `.itest`）、空文件、损坏 JSON 一律中止；只恢复本次创建的备份 | 本次修复 | `tests/test-regress-lib.ps1`（6 条） |
 | REG-48 | 测试不能假绿：`skip` 单独统计不计 PASS；集成用例数少于 49 判失败；REG-27 右侧断言失败必须冒泡 | 本次修复 | `integration-page.js` 的 `t()` / REG-27；`regression.ps1` / `integration.ps1` 的 `Report-Cases` |
@@ -81,7 +81,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-55 | 节假日失败只冷却 10 分钟且 force 可重试；天气数据超过 3 小时标注「可能过期」；x/y 为 null 时窗口不贴左上角 | 本次修复 | 人工抽查（依赖时间 / 网络状态） |
 | REG-56 | CDP 连接、发送、接收都有超时；unit-*.js 自动发现；Release 先草稿后统一公开 | 本次修复 | `_dev_cdp.ps1`、脚本自动发现；workflow 人工核对 |
 | REG-57 | 只读告警提供「打开数据目录 / 重试」；提示改名而不是删除；设置面板 inert、待办操作禁用；告警条高度计入窗口布局 | 本次修复 | 只读告警提供解除入口，并禁用设置与待办操作 |
-| REG-58 | 保存连续失败时顶部明确提示，恢复后自动收起 | 本次修复 | REG-36 + 人工；`save()` 连续 3 次失败提示 |
+| REG-58 | 保存连续失败时顶部明确提示，恢复后自动收起 | 本次修复 | REG-36 + 人工；`save()` 首次失败即提示 |
 | REG-59 | REG-46 用临时数据目录 + 预置收件箱条目，不碰用户真实数据；旧实现会在 drain 时写出空壳 | 本次修复 | `regression.ps1` 的 REG-46（`DESKTOP_TODO_DATA_DIR`） |
 | REG-60 | 两套回归脚本互斥；集成用例下限 49；守卫自测至少 6 条 | 本次修复 | `regression.ps1` / `integration.ps1` 的命名互斥量与计数断言 |
 | REG-61 | MSIX 签名口令优先读环境变量，不再要求写进命令行 | 本次修复 | `build-msix.ps1`（人工核对调用方式） |
@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-67 | 双击行内按钮只执行一次，不能连带删掉/完成下一条 | 本次修复 | 双击行内按钮只作用一次 |
 | REG-68 | 误点完成后可从撤销提示恢复 | 本次修复 | 误点完成后可通过撤销恢复 |
 | REG-69 | 磁盘里的天气数据形状异常时丢弃，不能启动即只读 | 本次修复 | 天气数据形状异常时丢弃 |
-| REG-70 | 原子写不再用 `fs::copy` 回退；非 UTF-8 内容按损坏隔离；超过 24 小时的 `.corrupt-*` 不再永久锁死 | 本次修复 | Rust `stale_corrupt_backup...` 等；人工核对 `write_json_atomic` |
+| REG-70 | 原子写不再用 `fs::copy` 回退；非 UTF-8 内容按损坏隔离；超过 30 天的 `.corrupt-*` 不再永久锁死 | 本次修复 | Rust `stale_corrupt_backup...` 等；人工核对 `write_json_atomic` |
 | REG-71 | 回归前快照 `HKCU\...\Run\DesktopTodo`，结束后原样回填（含测试 exe 路径场景）；Rust/JS 单测都有条数下限 | 本次修复 | `regression.ps1` / `integration.ps1` 的注册表快照与 `MIN_*` 断言 |
 | REG-72 | MSIX 在 draft Release 生成后打包；`fetch_json` 拒绝重定向与 IPv6 内网；测试 exe 按 src 全目录与端口失效缓存 | 本次修复 | workflow 顺序、Rust 地址过滤用例、`build-stamp.json` |
 | REG-73 | `todos` 字段存在但不是数组时停止写入，不能静默当空清单覆盖 | 本次修复 | `core.validateLoadedState` 单元用例 |
@@ -110,12 +110,12 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-84 | MSIX 拒绝 major≥1 的映射；测试 exe 缓存包含脚本自身改动 | 本次修复 | `build-msix.ps1` / `build-test-exe.ps1` |
 | REG-85 | tray 初始化失败提示、任务栏与托盘换序回滚、capabilities 允许 destroy、自定义天气允许有限跳转、`1:00` 时长、自启路径比对、退出 flush 不超时、悬停 grace 复位、文本强制转字符串、预报首行兜底 | 本次修复 | Rust 时长/地址用例；`unit-core`；人工手测 |
 | REG-86 | 天气预报按「本地今天 + 第 i 天」映射日历日期，城市时区与系统不同也不会丢天气图标 | 本次修复 | 人工切换异地城市；代码审查 `localWeatherDayKey` |
-| REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 51 条 |
+| REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 52 条 |
 | REG-88 | 自启回读整路径编码损坏时退化为文件名匹配，中文安装路径不会恒显示「已关闭」 | 本次修复 | Rust `autostart_output_falls_back_to_ascii_file_name` |
 | REG-89 | 损坏备份窗口放宽到 30 天，mtime 刷新失败会打印告警，不会刚隔离就“过期” | 本次修复 | Rust `stale_corrupt_backup...`（31 天）+ 代码审查 |
 | REG-90 | 边缘收起期间被跳过的布局，弹出后补跑 `scheduleLayout()` | 本次修复 | 人工：贴边收起时 AI 写入待办 |
 | REG-91 | CDP 就绪后校验页面 URL 含 `?test=1`，不把用例送进别人的调试页 | 本次修复 | `regression.ps1` / `integration.ps1` |
-| REG-92 | REG-19/20 找不到目标不再 skip；REG-49 不可滚如实记 skip | 本次修复 | 对应用例 |
+| REG-92 | REG-19/20 找不到目标不再 skip；REG-49 不可滚判失败 | 本次修复 | 对应用例 |
 | REG-93 | 公开 Release 前校验 `desktop-todo_<ver>-setup.exe` 与 `desktop-todo_<ver>.exe` 两个资产 | 本次修复 | `.github/workflows/release.yml` |
 | REG-94 | 任务栏取消不回滚、托盘惰性重建、卸载清理自启项、list_todos 只读不隔离、DSH 配置原子写、旧收件箱迁移兜底、DNS 解析失败报错、`allow_local` 只允许自定义天气 host、双击/非字符串 id/输入法/GPS 竞态/断网悬浮信息 | 本次修复 | Rust 单测 + REG-43 + 人工手测 |
 | REG-95 | 拖动主界面进入边缘后开始计时；超时若左键仍按下不收起，松开鼠标后才按最终位置收起 | 本次修复 | Rust `left_button_down`；人工按住鼠标拖到上/左/右边缘验证 |
@@ -123,7 +123,14 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-97 | `save_state` 拒绝非对象载荷，渲染层回归不能写坏 data.json | 本次修复 | 代码审查 + Rust 命令层 |
 | REG-98 | 公网 DNS 多地址一次钉入（不互相覆盖）；自定义天气跳转只允许同 host；BOM JSON 可恢复；mtime 刷不上时复制成新备份 | 本次修复 | Rust 单测/代码审查 |
 | REG-99 | 边缘已弹出时布局照常重排；`flushSave` 清防抖并等 `saving`；click 防护使用同坐标时间窗 | 本次修复 | REG-49 / REG-67 / 人工边缘天气卡验证 |
-| REG-100 | Publisher 允许完整 DN；REG-38 校验 4xx 真实发生；REG-46 等 `?test=1` 页面和 `#app`；REG-33/49 不转 skip；MSIX 用脚本返回路径 | 本次修复 | 对应脚本与用例 |
+| REG-100 | Publisher 允许完整 DN；REG-38 校验 4xx 真实发生；REG-46 等 `?test=1` 页面和 `#app`；REG-33/49 不转 skip（REG-49 判失败）；MSIX 用脚本返回路径 | 本次修复 | 对应脚本与用例 |
+| REG-101 | 已排队的防抖保存落盘前必须再检查 drain，避免覆盖刚合并的 AI 待办 | 本次修复 | 代码审查 + REG-45 |
+| REG-102 | 非数组 `todos` 不许被重置；缺 text 的待办不静默丢；未知顶层键/字段保存时保留 | 本次修复 | Rust `drain_rejects_non_array...`；`unit-core` |
+| REG-103 | 回归前把真实收件箱（含旧 AppData）移走，结束后原样放回 | 本次修复 | `regression.ps1` / `integration.ps1` |
+| REG-104 | `.keep` 残留也会阻止备份；窗口位置只由 savePosition 回写；退出等待有 5 秒上限 | 本次修复 | `test-regress-lib` / 人工启动位置 |
+| REG-105 | 数据根统一 `~/.desktoptodo` 并迁移；自定义天气 IPv6 归一；`normalize_due` 校验日历合法性；`add_minutes` 支持时区；数字 duration 限 1..1440 | 本次修复 | Rust 单测 + MSIX 真机验证 |
+| REG-106 | MSIX skip 不再导致 CI 硬失败；集成门禁要求实际执行数；断网 REG-11/38 转 skip；REG-36 断言注入发生；REG-44 还原进 finally | 本次修复 | workflow + 对应用例 |
+| REG-107 | 互斥量失败有提示并退 Local；保存前留 `data.json.bak`；收件箱 tmp 带 PID；坏样本带时间戳不覆盖 | 本次修复 | Rust 单测 + 代码审查 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

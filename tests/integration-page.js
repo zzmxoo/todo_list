@@ -588,7 +588,15 @@
         url: 'https://uapis.cn/api/v1/misc/weather?city=北京&forecast=true',
       });
     } catch (err) {
-      if (String(err).includes('429')) return 'skip: rate limited';
+      const msg = String(err);
+      if (msg.includes('429')) return 'skip: rate limited';
+      if (
+        navigator.onLine === false ||
+        msg.includes('NET_ERR') ||
+        /连接失败|超时|请求发送失败|响应读取失败/.test(msg)
+      ) {
+        return 'skip: network unavailable (' + msg + ')';
+      }
       throw err;
     }
     ok(data.temperature !== undefined, 'temperature field');
@@ -990,11 +998,15 @@
       input.value = '北京';
       input.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(2500);
-      ok(hint.hidden || !hint.textContent, 'hint cleared after manual input');
-      Object.defineProperty(navigator, 'geolocation', { value: savedGeo, configurable: true });
+      ok(hint.hidden, 'hint cleared after manual input');
       return 'hint shown and cleared';
     } finally {
       window.__TEST_INVOKE = null;
+      try {
+        Object.defineProperty(navigator, 'geolocation', { value: savedGeo, configurable: true });
+      } catch (err) {
+        /* ignore */
+      }
       await closeSettings();
     }
   });
@@ -1102,7 +1114,12 @@
       if (input) {
         input.value = '上海';
         input.dispatchEvent(new Event('change', { bubbles: true }));
-        await waitFor(() => (($('#wcStatus') || {}).textContent || '') === '', 20000, 250);
+        const settled = await waitFor(
+          () => (($('#wcStatus') || {}).textContent || '') === '',
+          20000,
+          250
+        );
+        if (settled < 0) return 'skip: network unavailable';
       }
       ok(infoFires(), 'baseline: hover info available');
       await sleep(1400);
@@ -1128,7 +1145,12 @@
       if (input) {
         input.value = '成都';
         input.dispatchEvent(new Event('change', { bubbles: true }));
-        await waitFor(() => (($('#wcStatus') || {}).textContent || '').includes('连接失败'), 20000, 250);
+        const failedStatus = await waitFor(
+          () => (($('#wcStatus') || {}).textContent || '').includes('连接失败'),
+          20000,
+          250
+        );
+        ok(failedStatus >= 0, 'network error not surfaced: ' + (($('#wcStatus') || {}).textContent || ''));
       }
       await sleep(300);
       ok(infoFires(), 'network error must keep local hover info');
@@ -1605,14 +1627,17 @@
     const realInvoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
     const text = 'ITEST-断网保存-' + Date.now();
     let failSaves = true;
+    let injected = 0;
     window.__TEST_INVOKE = function (cmd, args) {
       if (cmd === 'save_state' && failSaves) {
+        injected += 1;
         return Promise.reject(new Error('网络异常：无法写入磁盘'));
       }
       return realInvoke(cmd, args);
     };
     try {
       await addTodo(text);
+      ok(injected > 0, 'save failure path not exercised');
       eq(todoTexts().includes(text), true, 'todo stays in memory after failed save');
 
       // 恢复后不需要再做任何操作，自动补写必须把内存状态落盘

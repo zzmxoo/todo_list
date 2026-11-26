@@ -97,7 +97,7 @@ fn upsert_marketplace(manifest_path: &Path, plugin_dir_name: &str) -> Result<(),
     let object = root.as_object_mut().expect("object");
     let list = object.entry("plugins").or_insert_with(|| json!([]));
     if !list.is_array() {
-        *list = json!([]);
+        return Err("marketplace.json 的 plugins 不是数组，已中止且未修改".into());
     }
     let plugins = list.as_array_mut().expect("array");
     plugins.retain(|item| item.get("name").and_then(Value::as_str) != Some(PLUGIN_NAME));
@@ -166,7 +166,10 @@ pub fn install_dsh(home: &Path, exe: &Path) -> Result<String, String> {
         ));
     }
     let target = dsh.join("desktop-todo.mcp.yml");
-    let tmp = target.with_extension("yml.tmp");
+    let tmp = target.with_file_name(format!(
+        "desktop-todo.mcp.{}.tmp",
+        std::process::id()
+    ));
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
     if !super::atomic_replace(&tmp, &target) {
         let _ = fs::remove_file(&tmp);
@@ -395,10 +398,10 @@ mod tests {
         let text = fs::read_to_string(home.join(".dsh").join("desktop-todo.mcp.yml")).unwrap();
         assert!(text.contains("serverName: desktop-todo"));
         assert!(text.contains("--mcp"));
-        assert!(!home
-            .join(".dsh")
-            .join("desktop-todo.mcp.yml.tmp")
-            .exists());
+        assert!(!fs::read_dir(home.join(".dsh"))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".tmp")));
         let _ = fs::remove_dir_all(home);
     }
 }

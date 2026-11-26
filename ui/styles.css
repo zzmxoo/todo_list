@@ -478,7 +478,8 @@ body.minimal-mode .ai-tag {
 }
 
 .todo-row:hover .due-label { display: none; }
-.todo-row:hover .actions { display: flex; }
+.todo-row:hover .actions,
+.todo-row:focus-within .actions { display: flex; }
 
 .act-btn {
   width: 20px;

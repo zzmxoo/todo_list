@@ -1,4 +1,4 @@
-# 桌面待办 · 项目交接与上下文摘要
+﻿# 桌面待办 · 项目交接与上下文摘要
 
 > 更新：2026-11-23 · 最新 tag：`0.0.8`
 > 用途：后续会话 / 协作者先读本文件，快速恢复产品背景、设计规范、技术约束和测试约定。
@@ -8,7 +8,7 @@
 Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴边隐藏；主界面是待办列表，日历模式为「左待办 + 右月历」单页布局，天气和每日一句作为辅助信息。
 
 - 技术栈：Tauri v2 + WebView2 + Rust；前端为原生 HTML/CSS/JS，**无 Node 构建、无框架、无打包器**。
-- 数据只存本机：`%APPDATA%\com.desktoptodo.widget\data.json`。
+- 数据只存本机：`%USERPROFILE%\.desktoptodo\data.json`（旧版 `%APPDATA%` 目录首次启动自动迁移）。
 - 发布版：`cargo build --release` 后运行 `src-tauri\target\release\desktop-todo.exe`，前端资源编译进 exe。
 - 仓库当前没有配置远程，提交和 tag 都在本地。
 
@@ -173,7 +173,7 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 - CLI：`desktop-todo.exe --add "..." [--due] [--start] [--duration] [--provider] [--source] [--pinned]`。
 - 注册：`desktop-todo.exe --install-mcp workbuddy|dsh|generic [--exe <path>]`；WorkBuddy 写入本地插件市场（仍需用户点一次安装），DSH 生成配置片段，generic 输出 JSON。
 - 会议支持：`start` + `duration_minutes`（或 `time`/`due` + `duration`），服务端自动算结束时间；列表显示 `10:30–11:30`，日历按区间绘制。
-- 写入走 `%APPDATA%\com.desktoptodo.widget\ai-inbox\<id>.json` 收件箱；桌面端每秒 drain，按 id 去重后合并进 `data.json`。
+- 写入走 `%USERPROFILE%\.desktoptodo\ai-inbox\<id>.json` 收件箱；桌面端每秒 drain，按 id 去重后合并进 `data.json`。
 - 桌面端未运行时收件箱保留，下次启动合并；不监听端口、不联网。
 - 列表给 AI 待办显示来源标签；未知 provider 按通用字段解析。
 - 字段适配集中在 `src-tauri/src/ai/providers.rs` 的 `PROVIDERS`，新增客户端只加一条配置。
@@ -245,13 +245,13 @@ Tauri 命令：
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 ```
 
-- Rust：51 条（缓动、插值、注册表命令参数与引号、AI provider 归一、时长与日期边界、收件箱、损坏数据保留与重启检测、MCP、客户端注册、外网地址过滤、自启回读兜底）
+- Rust：52 条（缓动、插值、注册表命令参数与引号、AI provider 归一、时长与日期边界、收件箱、损坏数据保留与重启检测、MCP、客户端注册、外网地址过滤、自启回读兜底）
 - 脚本自测：6 条（备份守卫：残留备份 / 跨脚本备份 / 空 / 损坏数据一律不覆盖）
 - JS 单元：49 条（core / calendar / todo / domain / weather，含待办归一、加载校验、节气边界）
 - 数据：名言 1313 条、无重复、字段完整
 - UI 集成：49 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入、损坏数据保护、编辑态保护、只读解除、双击与撤销
-- 当前结果：**157 passed / 0 failed / 0 skipped**（fix/code-review 分支）
-- 测试会自动备份/恢复 `%APPDATA%\com.desktoptodo.widget\data.json`，结束后重启常驻程序；发现残留备份会中止，避免覆盖用户数据。REG-46 通过 `DESKTOP_TODO_DATA_DIR` 使用临时目录，不碰真实数据。
+- 当前结果：**158 passed / 0 failed / 0 skipped**（fix/code-review 分支）
+- 测试会自动备份/恢复 `%USERPROFILE%\.desktoptodo\data.json`，结束后重启常驻程序；发现残留备份会中止，避免覆盖用户数据。REG-46 通过 `DESKTOP_TODO_DATA_DIR` 使用临时目录，不碰真实数据。
 - UI 测试通过 WebView2 CDP（端口 9222）在真实应用里执行；集成脚本超过 32KB，统一用临时文件传给 CDP。
 
 维护规则：
@@ -296,7 +296,7 @@ cargo build --release
 - 开机启动记录的是 exe 绝对路径；移动/重命名程序后需要重新开关一次。
 - 托盘图标是否进入溢出区、任务栏按钮是否消失，只能在真实 Windows 桌面确认。
 - 窗口动画在低性能/远程桌面环境可能仍有轻微掉帧，测试只约束位置、时长、无回弹和单层结构。
-- `data.json` 是唯一数据源；没有自动备份机制。测试脚本会备份/恢复。
+- `data.json` 是唯一数据源；每次保存前会留一份 `data.json.bak` 上一版快照。测试脚本会备份/恢复。
 - 无安装包、无自动更新、无远程仓库。
 
 ## 10. 后续可能的扩展

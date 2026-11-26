@@ -1,4 +1,6 @@
-; 卸载时清理开机启动项，避免登录时尝试拉起已删除的 exe。
+; 卸载时清理开机启动项；升级安装的静默卸载阶段不能删。
 !macro NSIS_HOOK_POSTUNINSTALL
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "DesktopTodo"
+  ${IfNot} ${isUpdated}
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "DesktopTodo"
+  ${EndIf}
 !macroend

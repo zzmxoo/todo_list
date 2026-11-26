@@ -27,7 +27,7 @@ pub fn enqueue(dir: &Path, todo: &AiTodo) -> Result<PathBuf, String> {
         return Err("待办 id 非法".into());
     }
     let inbox = inbox_dir(dir)?;
-    let tmp = inbox.join(format!(".{}.tmp", todo.id));
+    let tmp = inbox.join(format!(".{}.{}.tmp", todo.id, std::process::id()));
     let dst = inbox.join(format!("{}.json", todo.id));
     let text = serde_json::to_string_pretty(todo).map_err(|e| e.to_string())?;
     fs::write(&tmp, text).map_err(|e| e.to_string())?;
@@ -108,8 +108,15 @@ pub(crate) fn strip_bom(bytes: &[u8]) -> &[u8] {
 }
 
 fn quarantine(path: &Path) {
-    let bad = path.with_extension("bad");
-    let _ = fs::remove_file(&bad);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or_default();
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("entry");
+    let bad = path.with_file_name(format!("{name}.bad-{stamp}"));
     let _ = fs::rename(path, bad);
 }
 
@@ -276,10 +283,15 @@ pub fn drain(dir: &Path) -> Result<Vec<AiTodo>, String> {
     let mut added = Vec::new();
     {
         let object = root.as_object_mut().expect("root is object");
-        let todos = object.entry("todos").or_insert_with(|| json!([]));
-        if !todos.is_array() {
-            *todos = json!([]);
+        // 不能把非数组 todos 重置成空数组再落盘：那等于静默删除用户数据。
+        if object
+            .get("todos")
+            .map(|value| !value.is_array())
+            .unwrap_or(false)
+        {
+            return Err(corrupt_error(&data_path, "todos 不是数组".into()));
         }
+        let todos = object.entry("todos").or_insert_with(|| json!([]));
         let list = todos.as_array_mut().expect("todos is array");
         let mut seen: HashSet<String> = list
             .iter()
@@ -348,7 +360,10 @@ mod tests {
         let added = drain(&dir).unwrap();
         assert_eq!(added.len(), 1);
         assert_eq!(read_todos(&dir).len(), 1);
-        assert!(dir.join("ai-inbox").join("broken.bad").exists());
+        assert!(fs::read_dir(dir.join("ai-inbox"))
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|item| item.file_name().to_string_lossy().to_string()))
+            .any(|name| name.starts_with("broken.json.bad-")));
         assert!(drain(&dir).unwrap().is_empty());
         let _ = fs::remove_dir_all(dir);
     }
@@ -481,6 +496,29 @@ mod tests {
             enqueue(&dir, &todo(&format!("cap-{i:03}"), "x")).unwrap();
         }
         assert_eq!(pending(&dir).len(), 200);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn drain_rejects_non_array_todos_without_data_loss() {
+        let dir = test_dir("bad-todos");
+        fs::write(dir.join("data.json"), r#"{"todos":{"keep":true}}"#).unwrap();
+        enqueue(&dir, &todo("ai-bad", "不能覆盖")).unwrap();
+        let err = drain(&dir).unwrap_err();
+        assert!(err.contains("todos"), "unexpected: {err}");
+        assert!(!dir.join("data.json").exists(), "bad file should be quarantined");
+        let corrupt = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|item| item.path()))
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with("data.json.corrupt-"))
+                    .unwrap_or(false)
+            })
+            .expect("quarantined data");
+        assert!(fs::read_to_string(corrupt).unwrap().contains("keep"));
+        assert!(dir.join("ai-inbox").join("ai-bad.json").exists());
         let _ = fs::remove_dir_all(dir);
     }
 

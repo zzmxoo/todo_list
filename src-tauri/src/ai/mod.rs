@@ -46,50 +46,51 @@ pub fn data_dir() -> Result<PathBuf, String> {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         return Ok(dir);
     }
-    let base = std::env::var_os("APPDATA")
+    // 商店版（MSIX）会虚拟化 AppData，GUI 与外部 AI 进程会看到两份 data.json。
+    // 统一放到用户目录下，收件箱与主数据同根。
+    let home = std::env::var_os("USERPROFILE")
         .map(PathBuf::from)
-        .ok_or_else(|| "APPDATA 未设置".to_string())?;
-    let dir = base.join(APP_IDENTIFIER);
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .ok_or_else(|| "USERPROFILE / APPDATA 未设置".to_string())?;
+    let dir = home.join(".desktoptodo");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
 pub fn inbox_dir(dir: &Path) -> Result<PathBuf, String> {
-    // 跨进程收件箱不能放在 AppData：MSIX 的 AppData 虚拟化会让 GUI 与
-    // 外部 AI 客户端看到两个不同目录。生产统一放用户目录，测试仍隔离在临时目录。
-    let path = if cfg!(test) || data_dir_override().is_some() {
-        dir.join(INBOX_DIR)
-    } else {
-        let home = std::env::var_os("USERPROFILE")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
-            .ok_or_else(|| "USERPROFILE / APPDATA 未设置".to_string())?;
-        home.join(".desktoptodo").join(INBOX_DIR)
-    };
+    // data_dir 已经是跨进程共享的 ~/.desktoptodo（测试则指向临时目录）。
+    let path = dir.join(INBOX_DIR);
     fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-    // 旧版本把收件箱放在 AppData；升级时把尚未处理的条目搬过来（尽力而为）。
-    let legacy = dir.join(INBOX_DIR);
-    if legacy != path && legacy.exists() {
-        if let Ok(entries) = fs::read_dir(&legacy) {
-            for entry in entries.flatten() {
-                let src = entry.path();
-                if src.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                    continue;
-                }
-                let dst = path.join(entry.file_name());
-                if !dst.exists() {
-                    if fs::rename(&src, &dst).is_err() {
-                        // 跨卷/权限场景 rename 会失败，copy 成功后再删源。
-                        match fs::copy(&src, &dst) {
-                            Ok(_) => {
-                                let _ = fs::remove_file(&src);
-                            }
-                            Err(err) => {
-                                eprintln!(
-                                    "warning: 迁移旧收件箱失败 {} -> {}: {err}",
-                                    src.display(),
-                                    dst.display()
-                                );
+    // 旧版本把收件箱放在 AppData；升级时搬过来。测试目录不迁移用户真实收件箱。
+    let legacy = if cfg!(test) || data_dir_override().is_some() {
+        None
+    } else {
+        std::env::var_os("APPDATA")
+            .map(|base| PathBuf::from(base).join(APP_IDENTIFIER).join(INBOX_DIR))
+    };
+    if let Some(legacy) = legacy.filter(|legacy| legacy != &path) {
+        if legacy.exists() {
+            if let Ok(entries) = fs::read_dir(&legacy) {
+                for entry in entries.flatten() {
+                    let src = entry.path();
+                    if src.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let dst = path.join(entry.file_name());
+                    if !dst.exists() {
+                        if fs::rename(&src, &dst).is_err() {
+                            // 跨卷/权限场景 rename 会失败，copy 成功后再删源。
+                            match fs::copy(&src, &dst) {
+                                Ok(_) => {
+                                    let _ = fs::remove_file(&src);
+                                }
+                                Err(err) => {
+                                    eprintln!(
+                                        "warning: 迁移旧收件箱失败 {} -> {}: {err}",
+                                        src.display(),
+                                        dst.display()
+                                    );
+                                }
                             }
                         }
                     }
@@ -180,8 +181,14 @@ pub fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), S
     let tmp = path.with_file_name(format!("{name}.{}.tmp", std::process::id()));
     let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
     let mut file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
-    file.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
+    if let Err(err) = file.write_all(text.as_bytes()) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err.to_string());
+    }
+    if let Err(err) = file.sync_all() {
+        let _ = fs::remove_file(&tmp);
+        return Err(err.to_string());
+    }
     drop(file);
     for attempt in 0..3 {
         if atomic_replace(&tmp, path) {

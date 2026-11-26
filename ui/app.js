@@ -224,7 +224,7 @@
   const PhysicalPosition = tauri.dpi?.PhysicalPosition || tauri.window?.PhysicalPosition;
   const convertFileSrc = tauri.core?.convertFileSrc;
 
-  const state = { todos: [], settings: { ...DEFAULT_SETTINGS }, weather: null };
+  const state = { todos: [], settings: { ...DEFAULT_SETTINGS }, weather: null, __raw: null };
   const els = {};
   let weatherLeft = false;
   let settingsOpen = false;
@@ -697,6 +697,7 @@
       const loaded = await invoke("load_state");
       validateLoadedState(loaded);
       if (loaded && typeof loaded === "object") {
+        state.__raw = loaded;
         if (Array.isArray(loaded.todos)) state.todos = loaded.todos;
         if (loaded.settings && typeof loaded.settings === "object") {
           state.settings = { ...DEFAULT_SETTINGS, ...loaded.settings };
@@ -716,9 +717,9 @@
     renderCalendar();
     renderWeatherCard();
     renderWeatherPill();
-    await scheduleLayout();
     await restorePosition();
     await refreshMonitorBounds();
+    await scheduleLayout();
     try {
       if (win) await win.setAlwaysOnTop(!!state.settings.always_on_top);
     } catch (err) {
@@ -726,12 +727,17 @@
     }
 
     const wantWeather = !!state.settings.weather_open;
-    state.settings.weather_open = false;
     els.weatherPill.hidden = false;
-    if (wantWeather) {
-      await toggleWeather(true);
-    } else {
+    if (state.settings.calendar) {
+      // 日历模式没有独立天气卡，但不要吞掉用户“下次打开天气”的偏好。
       updateWeatherPillState();
+    } else {
+      state.settings.weather_open = false;
+      if (wantWeather) {
+        await toggleWeather(true);
+      } else {
+        updateWeatherPillState();
+      }
     }
 
     updateClock();
@@ -816,13 +822,19 @@
   function save() {
     if (loadFailed) return; // 数据文件损坏时保持只读，避免覆盖待恢复的原文件
     // drain 正在把 AI 待办合并进 data.json；此时用旧 state 整包保存会把它覆盖掉。
-    if (aiPullBusy) {
+    if (aiPullBusy && Date.now() - aiBusySince < 5000) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(save, 200);
       return;
     }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
+      // 排队之后、真正写盘之前 drain 可能已经开始；必须再检查一次，
+      // 否则旧 state 会整包覆盖刚合并进磁盘的 AI 待办。
+      if (aiPullBusy && Date.now() - aiBusySince < 5000) {
+        save();
+        return;
+      }
       // 上一次写盘还没结束：重新排队，绝不能直接丢弃（那会丢掉这期间的用户改动）
       if (saving) {
         save();
@@ -861,20 +873,23 @@
     // 取消尚未触发的防抖保存，避免退出时旧载荷后落盘。
     clearTimeout(saveTimer);
     saveTimer = null;
+    const deadline = Date.now() + 5000;
     // 等 drain 合并完成，避免退出时用旧 state 覆盖刚写入的 AI 待办。
-    // 退出路径不做超时：多等一会儿无害，丢一条 AI 待办不可恢复。
-    while (aiPullBusy) {
+    // 但 IPC 卡死不能把退出也锁死：5 秒后照常写盘退出（收件箱条目还在）。
+    while (aiPullBusy && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     // 等已经在途的写盘结束，再写最新状态。
-    while (saving) {
+    while (saving && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     await invoke("save_state", { state: serializeState() });
   }
 
   function serializeState() {
+    const raw = state.__raw && typeof state.__raw === "object" ? state.__raw : {};
     return {
+      ...raw,
       todos: state.todos,
       settings: state.settings,
       weather: state.weather,
@@ -901,7 +916,10 @@
     if (edgeHide) return; // 隐藏时保留进入隐藏前的位置
     try {
       const rect = await getWindowRect();
-      if (rect.x !== state.settings.x || rect.y !== state.settings.y) {
+      if (
+        Math.abs(rect.x - Number(state.settings.x)) > 0.5 ||
+        Math.abs(rect.y - Number(state.settings.y)) > 0.5
+      ) {
         state.settings.x = Math.round(rect.x);
         state.settings.y = Math.round(rect.y);
         save();
@@ -1016,8 +1034,7 @@
     if (Math.abs(x - rect.x) > 0.5 || Math.abs(y - rect.y) > 0.5) {
       await setWindowPos(x, y);
     }
-    state.settings.x = x;
-    state.settings.y = y;
+    // 位置只由 savePosition() 回写，clamp 不能覆盖磁盘里的用户位置。
   }
 
   /** 拖动结束后贴近屏幕边缘时自动吸附 */
@@ -1325,7 +1342,7 @@
 
   function startEdgePoll() {
     clearInterval(edgePollTimer);
-    edgePollTimer = setInterval(pollEdgeHover, 200);
+    edgePollTimer = setInterval(pollEdgeHover, 400);
   }
 
   // 托盘图标唤出：如果处于边缘收起状态，弹出后 5 秒自动收回（鼠标在窗口上则顺延）
@@ -1835,6 +1852,7 @@
 
   /* --------------------------------------------------------- AI 接入 */
   let aiPullBusy = false;
+  let aiBusySince = 0;
   let aiPullFailures = 0;
   let aiNextAttempt = 0;
 
@@ -1849,6 +1867,7 @@
     if (loadFailed) return; // 损坏数据待恢复时，收件箱也不能写盘
     if (aiPullBusy || Date.now() < aiNextAttempt) return;
     aiPullBusy = true;
+    aiBusySince = Date.now();
     try {
       const items = await invoke("drain_ai_todos");
       if (!Array.isArray(items) || !items.length) {
@@ -1886,12 +1905,14 @@
       aiNextAttempt = Date.now() + delay;
     } finally {
       aiPullBusy = false;
+      aiBusySince = 0;
     }
   }
 
   function deleteTodo(id) {
     if (loadFailed) return;
-    state.todos = state.todos.filter((todo) => todo.id !== id);
+    const index = state.todos.findIndex((todo) => todo.id === id);
+    if (index >= 0) state.todos.splice(index, 1);
     commitTodos();
   }
 
@@ -2733,6 +2754,7 @@
 
   function renderCalendar() {
     hideCalInfo();
+    if (!state.settings.calendar) return;
     const now = new Date();
     if (!monthCursor) monthCursor = { y: now.getFullYear(), m: now.getMonth() };
     const { y, m } = monthCursor;
@@ -3272,6 +3294,7 @@
 
     els.addRow.addEventListener("click", (event) => {
       if (event.target.closest(".add-input")) return;
+      if (event.target.closest(".add-clock")) return;
       startAdd();
     });
     els.addRow.addEventListener("keydown", (event) => {
@@ -3850,7 +3873,7 @@
     });
 
     window.addEventListener("beforeunload", () => {
-      if (loadFailed) return;
+      if (loadFailed || aiPullBusy || saving) return;
       try {
         invoke("save_state", { state: serializeState() });
       } catch (err) {

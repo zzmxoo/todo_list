@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # 两套回归脚本共用命名互斥量，避免同时抢 CDP 端口和同一 data 目录。
-$regressionMutex = New-Object System.Threading.Mutex($false, 'Local\TodoRegression')
+$regressionMutex = New-Object System.Threading.Mutex($false, 'Global\TodoRegression')
 $owned = $false
 try { $owned = $regressionMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
 if (-not $owned) { throw '另一个回归进程正在运行（integration.ps1 / regression.ps1），请等待其结束。' }
@@ -17,7 +17,7 @@ if (-not $owned) { throw '另一个回归进程正在运行（integration.ps1 / 
 $root = Split-Path $PSScriptRoot -Parent
 $cdp = Join-Path $root '_dev_cdp.ps1'
 $prodExe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
-$data = Join-Path $env:APPDATA 'com.desktoptodo.widget\data.json'
+$data = Join-Path $env:USERPROFILE '.desktoptodo\data.json'
 $backup = "$data.regress"
 . (Join-Path $PSScriptRoot 'regress-lib.ps1')
 
@@ -68,6 +68,10 @@ $autostartExisted = $false
 $autostartValue = $null
 $autostartSnapshotTaken = $false
 $appWasRunning = $false
+$inboxReal = Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'
+$inboxLegacy = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
+$inboxHold = $null
+$legacyHold = $null
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 function Eval-Expr([string]$expr) {
@@ -127,6 +131,15 @@ try {
   }
   $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
+  # 测试版会 drain 真实收件箱并删除源文件；先整个挪走，结束后原样放回。
+  if (Test-Path -LiteralPath $inboxReal) {
+    $inboxHold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-' + [guid]::NewGuid().ToString('N'))
+    Move-Item -LiteralPath $inboxReal -Destination $inboxHold -Force
+  }
+  if (Test-Path -LiteralPath $inboxLegacy) {
+    $legacyHold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-legacy-' + [guid]::NewGuid().ToString('N'))
+    Move-Item -LiteralPath $inboxLegacy -Destination $legacyHold -Force
+  }
 
   # 测试用 exe：编译期注入调试端口，产物隔离在 src-tauri\target-test\。
   # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 在 Edge/WebView2 158 起已失效，不能再依赖。
@@ -237,6 +250,11 @@ fetch('quotes.json')
     $failed += 1
     "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least $MIN_INTEGRATION_CASES"
   }
+  $executed = @($result.results | Where-Object { -not $_.skipped }).Count
+  if ($executed -lt $MIN_INTEGRATION_EXECUTED) {
+    $failed += 1
+    "FAIL  INTEGRATION only $executed cases actually executed, expected at least $MIN_INTEGRATION_EXECUTED"
+  }
 
   # REG-46 端到端：损坏的 data.json 不能被静默写成空壳。
   # 用临时数据目录 + 预置 ai-inbox 条目，完全不碰用户真实数据；
@@ -340,29 +358,32 @@ finally {
       if ($autostartExisted) {
         Set-ItemProperty -Path $runKey -Name 'DesktopTodo' -Value $autostartValue
       } else {
-        Remove-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction Stop
       }
     } catch {
       $failed += 1
       "FAIL  恢复开机启动注册表失败：$($_.Exception.Message)"
     }
   }
-  $inboxRoots = @(
-    (Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'),
-    (Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox')
-  )
-  foreach ($inbox in $inboxRoots) {
-    if (-not (Test-Path $inbox)) { continue }
-    Get-ChildItem $inbox -Filter '*.json' | ForEach-Object {
-      try {
-        if ((Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).text -match '^ITEST-(AI-INSERT|CORRUPT-PROBE)$') {
-          Remove-Item $_.FullName -Force
-        }
-      } catch { }
-    }
+  # 清掉测试期间新建的收件箱，再把用户原收件箱放回。
+  Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue
+  if ($inboxHold -and (Test-Path -LiteralPath $inboxHold)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $inboxReal -Parent) | Out-Null
+    Move-Item -LiteralPath $inboxHold -Destination $inboxReal -Force
+  }
+  if ($legacyHold -and (Test-Path -LiteralPath $legacyHold)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $inboxLegacy -Parent) | Out-Null
+    Move-Item -LiteralPath $legacyHold -Destination $inboxLegacy -Force
   }
   # 只有测试前本来就在运行、且进程已停干净时才重启发布版。
-  if ($appWasRunning -and -not $stillRunning -and (Test-Path $prodExe)) { Start-Process $prodExe }
+  if ($appWasRunning -and -not $stillRunning) {
+    if (Test-Path $prodExe) {
+      Start-Process $prodExe
+    } else {
+      "WARN  测试前的实例不是 $prodExe，未自动重启，请手动启动"
+    }
+  }
   try { $regressionMutex.ReleaseMutex() } catch { }
   $regressionMutex.Dispose()
 }

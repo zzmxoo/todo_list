@@ -2,14 +2,14 @@
 $ErrorActionPreference = 'Stop'
 
 # 与 regression.ps1 共用命名互斥量，避免同时抢 CDP 端口和同一 data 目录。
-$regressionMutex = New-Object System.Threading.Mutex($false, 'Local\TodoRegression')
+$regressionMutex = New-Object System.Threading.Mutex($false, 'Global\TodoRegression')
 $owned = $false
 try { $owned = $regressionMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
 if (-not $owned) { throw '另一个回归进程正在运行（integration.ps1 / regression.ps1），请等待其结束。' }
 
 $root = Split-Path $PSScriptRoot -Parent
 $cdp = Join-Path $root '_dev_cdp.ps1'
-$data = Join-Path $env:APPDATA 'com.desktoptodo.widget\data.json'
+$data = Join-Path $env:USERPROFILE '.desktoptodo\data.json'
 $backup = "$data.itest"
 . (Join-Path $PSScriptRoot 'regress-lib.ps1')
 
@@ -36,6 +36,10 @@ $autostartExisted = $false
 $autostartValue = $null
 $autostartSnapshotTaken = $false
 $appWasRunning = $false
+$inboxReal = Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'
+$inboxLegacy = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
+$inboxHold = $null
+$legacyHold = $null
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 try {
   # 守卫、构建、备份都放在 try 内：任何一步抛错，finally 仍会重启发布版。
@@ -56,6 +60,15 @@ try {
   }
   $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
+  # 测试版会 drain 真实收件箱并删除源文件；先整个挪走，结束后原样放回。
+  if (Test-Path -LiteralPath $inboxReal) {
+    $inboxHold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-' + [guid]::NewGuid().ToString('N'))
+    Move-Item -LiteralPath $inboxReal -Destination $inboxHold -Force
+  }
+  if (Test-Path -LiteralPath $inboxLegacy) {
+    $legacyHold = Join-Path ([System.IO.Path]::GetTempPath()) ('todo-inbox-legacy-' + [guid]::NewGuid().ToString('N'))
+    Move-Item -LiteralPath $inboxLegacy -Destination $legacyHold -Force
+  }
 
   # 测试用 exe 由编译期注入调试端口生成，产物在 src-tauri\target-test\，
   # 不会污染发布版（见 build-test-exe.ps1 说明）。
@@ -116,6 +129,11 @@ try {
     $failed += 1
     "FAIL  INTEGRATION only $((@($result.results)).Count) cases, expected at least $MIN_INTEGRATION_CASES"
   }
+  $executed = @($result.results | Where-Object { -not $_.skipped }).Count
+  if ($executed -lt $MIN_INTEGRATION_EXECUTED) {
+    $failed += 1
+    "FAIL  INTEGRATION only $executed cases actually executed, expected at least $MIN_INTEGRATION_EXECUTED"
+  }
   if ([int]$result.skipped -gt 0) {
     "WARN  $($result.skipped) case(s) skipped（网络 / 显示器不满足），本次全绿不代表这些用例已执行"
   }
@@ -152,30 +170,33 @@ try {
       if ($autostartExisted) {
         Set-ItemProperty -Path $runKey -Name 'DesktopTodo' -Value $autostartValue
       } else {
-        Remove-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction Stop
       }
     } catch {
       $registryRestoreFailed = $true
       Write-Warning "恢复开机启动注册表失败：$($_.Exception.Message)"
     }
   }
-  $inboxRoots = @(
-    (Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'),
-    (Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox')
-  )
-  foreach ($inbox in $inboxRoots) {
-    if (-not (Test-Path $inbox)) { continue }
-    Get-ChildItem $inbox -Filter '*.json' | ForEach-Object {
-      try {
-        if ((Get-Content $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).text -match '^ITEST-(AI-INSERT|CORRUPT-PROBE)$') {
-          Remove-Item $_.FullName -Force
-        }
-      } catch { }
-    }
+  # 清掉测试期间新建的收件箱，再把用户原收件箱放回。
+  Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue
+  if ($inboxHold -and (Test-Path -LiteralPath $inboxHold)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $inboxReal -Parent) | Out-Null
+    Move-Item -LiteralPath $inboxHold -Destination $inboxReal -Force
+  }
+  if ($legacyHold -and (Test-Path -LiteralPath $legacyHold)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $inboxLegacy -Parent) | Out-Null
+    Move-Item -LiteralPath $legacyHold -Destination $inboxLegacy -Force
   }
   # 只有测试前本来就在运行、且进程已停干净时才重启发布版
   $prodExe = Join-Path $root 'src-tauri\target\release\desktop-todo.exe'
-  if ($appWasRunning -and -not $stillRunning -and (Test-Path $prodExe)) { Start-Process $prodExe }
+  if ($appWasRunning -and -not $stillRunning) {
+    if (Test-Path $prodExe) {
+      Start-Process $prodExe
+    } else {
+      Write-Warning "测试前的实例不是 $prodExe，未自动重启，请手动启动"
+    }
+  }
   try { $regressionMutex.ReleaseMutex() } catch { }
   $regressionMutex.Dispose()
   if ($restoreFailed) { throw "恢复用户数据失败，备份保留在 $backup" }

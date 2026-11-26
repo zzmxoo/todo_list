@@ -35,7 +35,8 @@
         "enable": true,
         "scope": [
           "$APPDATA/com.desktoptodo.widget/**",
-          "$APPLOCALDATA/com.desktoptodo.widget/**"
+          "$APPLOCALDATA/com.desktoptodo.widget/**",
+          "$HOME/.desktoptodo/**"
         ]
       }
     }

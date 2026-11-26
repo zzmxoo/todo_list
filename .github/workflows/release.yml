@@ -47,6 +47,15 @@ jobs:
         shell: pwsh
         run: ./tests/test-regress-lib.ps1
 
+      - name: 检查隐私政策占位符
+        shell: pwsh
+        run: |
+          $bad = Select-String -Path docs/PRIVACY.md -Pattern '\[(运营者名称|联系邮箱|生效日期)\]'
+          if ($bad) {
+            $bad | ForEach-Object { Write-Host "::error::隐私政策仍有占位符：$($_.Line)" }
+            exit 1
+          }
+
       - name: 单元测试
         shell: pwsh
         working-directory: src-tauri
@@ -106,6 +115,11 @@ jobs:
           }
           $msixPath = ./tests/build-msix.ps1 -IdentityName $id -Publisher $pub -PublisherDisplayName $pd
           if (-not $msixPath -or -not (Test-Path -LiteralPath $msixPath)) {
+            $outputText = if (Test-Path $env:GITHUB_OUTPUT) { Get-Content $env:GITHUB_OUTPUT -Raw } else { '' }
+            if ($outputText -match 'skip=true') {
+              Write-Host "::warning::MSIX 版本映射暂不支持当前版本，跳过 MSIX 上传"
+              exit 0
+            }
             Write-Host "::error::已配置 MSIX 身份但未生成安装包"
             exit 1
           }

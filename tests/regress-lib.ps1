@@ -10,8 +10,9 @@
 # 用例数量下限集中定义，避免脚本与文档各写一份。
 $MIN_REGRESS_LIB_CASES = 6
 $MIN_INTEGRATION_CASES = 49
+$MIN_INTEGRATION_EXECUTED = 46
 $MIN_UNIT_CASES = 49
-$MIN_RUST_CASES = 51
+$MIN_RUST_CASES = 52
 $QUOTE_COUNT = 1313
 
 function Assert-DataFileReadable([string]$path) {
@@ -37,7 +38,7 @@ function New-UserDataBackup([string]$data, [string]$backup) {
   $dir = Split-Path -Parent $data
   $leaf = Split-Path -Leaf $data
   $leftovers = @(Get-ChildItem -LiteralPath $dir -Filter "$leaf.*" -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -ne $backup -and $_.Name -match '\.(regress|itest)$' })
+    Where-Object { $_.FullName -ne $backup -and $_.Name -match '\.(regress|itest)(\.keep)?$' })
   if ($leftovers.Count -gt 0) {
     throw "发现另一套回归的残留备份 $($leftovers[0].FullName)。请先人工确认 data.json 与备份内容，处理掉备份后再运行。"
   }

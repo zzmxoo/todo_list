@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 # 与 regression.ps1 / integration.ps1 共用互斥量，避免同抢 CDP 端口。
-$regressionMutex = New-Object System.Threading.Mutex($false, 'Local\TodoRegression')
+$regressionMutex = New-Object System.Threading.Mutex($false, 'Global\TodoRegression')
 $owned = $false
 try { $owned = $regressionMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
 if (-not $owned) { throw '另一个回归进程正在运行（run.ps1 / integration.ps1 / regression.ps1）' }
@@ -11,7 +11,11 @@ $cdp = Join-Path (Split-Path $PSScriptRoot -Parent) '_dev_cdp.ps1'
 . (Join-Path $PSScriptRoot 'regress-lib.ps1')
 
 # 端口可能被别的 Chromium 调试页占用；必须确认是我们的 ?test=1 页面。
-$targets = Invoke-RestMethod "http://127.0.0.1:$Port/json"
+try {
+  $targets = Invoke-RestMethod "http://127.0.0.1:$Port/json"
+} catch {
+  throw "无法连接 CDP 端口 $Port：请先运行 tests\build-test-exe.ps1 并启动 target-test 版程序"
+}
 if (-not ($targets | Where-Object { $_.url -match 'index\.html\?test=1' })) {
   throw "端口 $Port 被其它进程占用（未找到本应用的 ?test=1 页面）"
 }

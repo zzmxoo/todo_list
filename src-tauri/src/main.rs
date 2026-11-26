@@ -16,12 +16,17 @@ extern "system" {
 }
 
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // 只有测试构建才允许 DESKTOP_TODO_DATA_DIR 覆盖，避免生产环境
-    // 因开发机残留环境变量把数据静默写到别处。
-    let dir = match ai::data_dir_override() {
-        Some(path) => path,
-        None => app.path().app_data_dir().map_err(|e| e.to_string())?,
-    };
+    // 与 CLI/MCP 共用不受 MSIX 虚拟化影响的用户目录。
+    let dir = ai::data_dir()?;
+    // 首次升级时把旧 AppData 里的 data.json 复制到新位置（测试目录不迁移）。
+    if ai::data_dir_override().is_none() && !dir.join("data.json").exists() {
+        if let Ok(old) = app.path().app_data_dir() {
+            let old_file = old.join("data.json");
+            if old != dir && old_file.exists() {
+                let _ = fs::copy(&old_file, dir.join("data.json"));
+            }
+        }
+    }
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -42,6 +47,10 @@ fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), Str
     let _guard = ai::inbox::lock_state();
     let path = data_dir(&app)?.join("data.json");
     ai::inbox::ensure_overwritable(&path)?;
+    // 保留上一版完整快照；copy 失败不阻断正常保存。
+    if path.exists() {
+        let _ = fs::copy(&path, path.with_extension("json.bak"));
+    }
     ai::write_json_atomic(&path, &state)
 }
 
@@ -147,7 +156,16 @@ async fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
                 .map(|name| name.starts_with("bg-"))
                 .unwrap_or(false);
             if is_bg {
-                let _ = fs::remove_file(path);
+                // 只清理一小时前的旧背景，给前端保存新路径留出失败回滚窗口。
+                let old = fs::metadata(&path)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|time| time.elapsed().ok())
+                    .map(|age| age.as_secs() > 3600)
+                    .unwrap_or(false);
+                if old {
+                    let _ = fs::remove_file(path);
+                }
             }
         }
     }
@@ -282,7 +300,11 @@ async fn fetch_json(
     // 其余调用方（定位、节假日、公共天气）仍按 SSRF 面收口。
     let allowed_host = if allow_local {
         let allowed = custom_weather_host(&app);
-        let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+        let host = parsed
+            .host_str()
+            .unwrap_or("")
+            .trim_matches(['[', ']'])
+            .to_ascii_lowercase();
         if allowed.as_deref() != Some(host.as_str()) {
             return Err("只允许访问自定义天气接口的地址".into());
         }
@@ -300,7 +322,12 @@ async fn fetch_json(
             if attempt.previous().len() >= 5 {
                 return attempt.stop();
             }
-            let host = attempt.url().host_str().unwrap_or("").to_ascii_lowercase();
+            let host = attempt
+                .url()
+                .host_str()
+                .unwrap_or("")
+                .trim_matches(['[', ']'])
+                .to_ascii_lowercase();
             if allow.as_deref() == Some(host.as_str()) {
                 attempt.follow()
             } else {
@@ -702,12 +729,25 @@ fn already_running() -> bool {
         fn GetLastError() -> u32;
     }
     const ERROR_ALREADY_EXISTS: u32 = 183;
-    let name: Vec<u16> = "Global\\DesktopTodoWidgetSingleInstance\0"
+    let global: Vec<u16> = "Global\\DesktopTodoWidgetSingleInstance\0"
         .encode_utf16()
         .collect();
-    let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, name.as_ptr()) };
+    let mut handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, global.as_ptr()) };
     if handle.is_null() {
-        return false;
+        eprintln!("single-instance: Global mutex failed, retrying Local");
+        let local: Vec<u16> = "Local\\DesktopTodoWidgetSingleInstance\0"
+            .encode_utf16()
+            .collect();
+        handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, local.as_ptr()) };
+        if handle.is_null() {
+            eprintln!("single-instance: mutex unavailable, protection disabled");
+            #[cfg(not(feature = "test-data-dir"))]
+            show_message(
+                "单实例保护不可用，请确认没有重复启动桌面待办。",
+                "桌面待办",
+            );
+            return false;
+        }
     }
     unsafe { GetLastError() == ERROR_ALREADY_EXISTS }
 }
@@ -737,7 +777,10 @@ fn show_message(text: &str, caption: &str) {
 /// 第二个实例直接退出会让人以为程序打不开（任务栏/托盘可能都被隐藏）。
 #[cfg(all(windows, not(feature = "test-data-dir")))]
 fn notify_already_running() {
-    show_message("桌面待办已经在运行（可能在托盘或任务栏）。", "桌面待办");
+    show_message(
+        "桌面待办已经在运行（可能在另一个 Windows 会话、托盘或任务栏）。",
+        "桌面待办",
+    );
 }
 
 fn main() {
