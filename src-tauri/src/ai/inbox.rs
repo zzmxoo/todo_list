@@ -69,7 +69,7 @@ fn read_pending(path: &Path) -> PendingRead {
         // 文件被短暂占用/杀软扫描：保留文件，下次重试，不能当坏 JSON 隔离。
         return PendingRead::Deferred;
     };
-    match serde_json::from_slice::<AiTodo>(&bytes) {
+    match serde_json::from_slice::<AiTodo>(strip_bom(&bytes)) {
         Ok(todo) => PendingRead::Todo(todo),
         Err(_) => PendingRead::Invalid,
     }
@@ -92,13 +92,19 @@ fn read_todos(dir: &Path) -> Vec<Value> {
     let Ok(bytes) = fs::read(path) else {
         return Vec::new();
     };
-    let Ok(root) = serde_json::from_slice::<Value>(&bytes) else {
+    let Ok(root) = serde_json::from_slice::<Value>(strip_bom(&bytes)) else {
         return Vec::new();
     };
     root.get("todos")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+pub(crate) fn strip_bom(bytes: &[u8]) -> &[u8] {
+    bytes
+        .strip_prefix(&[0xEF, 0xBB, 0xBF][..])
+        .unwrap_or(bytes)
 }
 
 fn quarantine(path: &Path) {
@@ -127,7 +133,13 @@ fn quarantine_data_file(path: &Path) -> PathBuf {
     // 否则隔天重启或旧文件首次隔离时会立刻过期，被当成全新安装。
     if let Ok(file) = fs::OpenOptions::new().write(true).open(&dst) {
         if file.set_modified(SystemTime::now()).is_err() {
-            eprintln!("warning: 无法刷新损坏备份的 mtime：{}", dst.display());
+            // 无法刷 mtime 时，复制成新文件（新文件 mtime 天然是现在），
+            // 否则备份可能刚隔离就被判“过期”。
+            let fresh = path.with_file_name(format!("data.json.corrupt-{stamp}-m"));
+            if fs::copy(&dst, &fresh).is_ok() {
+                let _ = fs::remove_file(&dst);
+                return fresh;
+            }
         }
     }
     dst
@@ -204,7 +216,7 @@ pub fn read_state_root(path: &Path) -> Result<Value, String> {
     // 用 bytes 解析：非 UTF-8 也属于内容损坏，应走隔离与恢复指引，
     // 而不是变成一个没有备份、没有提示的 IO 错误。
     let bytes = fs::read(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
-    let root = match serde_json::from_slice::<Value>(&bytes) {
+    let root = match serde_json::from_slice::<Value>(strip_bom(&bytes)) {
         Ok(value) => value,
         Err(err) => return Err(corrupt_error(path, err.to_string())),
     };
@@ -224,7 +236,7 @@ pub fn ensure_overwritable(path: &Path) -> Result<(), String> {
         return Ok(());
     }
     let bytes = fs::read(path).map_err(|e| format!("读取 data.json 失败：{e}"))?;
-    match serde_json::from_slice::<Value>(&bytes) {
+    match serde_json::from_slice::<Value>(strip_bom(&bytes)) {
         Ok(value) if value.is_object() => Ok(()),
         Ok(_) => Err(corrupt_error(path, "根节点不是对象".into())),
         Err(err) => Err(corrupt_error(path, err.to_string())),

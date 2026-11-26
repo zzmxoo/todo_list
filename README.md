@@ -89,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File tests\run.ps1
 
 ## 数据与隐私
 
-- 待办和设置只保存在本机 `%APPDATA%\com.desktoptodo.widget\data.json`。
+- 待办和设置保存在本机 `%APPDATA%\com.desktoptodo.widget\data.json`；外部 AI 写入的收件箱在 `%USERPROFILE%\.desktoptodo\ai-inbox\`。商店版可能由 Windows 把 AppData 重定向到包内目录，可用告警条/设置里的“打开数据目录”定位。
 - 天气默认来自 Open-Meteo 免费接口（无需密钥）：按设置中的城市或当前位置查询经纬度后获取实时与 7 日预报。自定义天气链接（含其中的 key / token）只保存在本机 `data.json`，请求由本程序直接发出。
 - 法定节假日数据来自 [NateScarlet/holiday-cn](https://github.com/NateScarlet/holiday-cn)（经 jsDelivr CDN 获取），仅保存日期与节日名。
 - 名言库随程序内置（`ui/quotes.json`），其中大部分整理自 [lowb](https://www.npmjs.com/package/lowb)（MIT），另含整理的经典名句；运行时不联网获取名言。

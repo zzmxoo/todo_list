@@ -36,6 +36,9 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, state: serde_json::Value) -> Result<(), String> {
+    if !state.is_object() {
+        return Err("状态格式异常，已拒绝写入".into());
+    }
     let _guard = ai::inbox::lock_state();
     let path = data_dir(&app)?.join("data.json");
     ai::inbox::ensure_overwritable(&path)?;
@@ -131,6 +134,23 @@ async fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+    // 前端只引用 settings.bg_image 一个路径，旧背景图不再需要。
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path == dst {
+                continue;
+            }
+            let is_bg = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("bg-"))
+                .unwrap_or(false);
+            if is_bg {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
     Ok(Some(dst.to_string_lossy().to_string()))
 }
 
@@ -188,7 +208,14 @@ const NET_ERR: &str = "NET_ERR:";
 fn ip_blocked(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(ip) => {
-            ip.is_loopback() || ip.is_private() || ip.is_unspecified() || ip.is_link_local()
+            let o = ip.octets();
+            ip.is_loopback()
+                || ip.is_private()
+                || ip.is_unspecified()
+                || ip.is_link_local()
+                || o[0] == 0 // 0.0.0.0/8
+                || (o[0] == 100 && (64..=127).contains(&o[1])) // 100.64/10 CGNAT/云元数据
+                || (o[0] == 198 && (o[1] == 18 || o[1] == 19)) // 198.18/15 基准测试网段
         }
         std::net::IpAddr::V6(ip) => {
             if let Some(v4) = ip.to_ipv4_mapped() {
@@ -228,10 +255,10 @@ fn custom_weather_host(app: &tauri::AppHandle) -> Option<String> {
     let text = fs::read_to_string(dir.join("data.json")).ok()?;
     let root: serde_json::Value = serde_json::from_str(&text).ok()?;
     let api = root.get("settings")?.get("weather_api")?.as_str()?.trim();
-    let after = api.split("://").nth(1)?;
-    let hostport = after.split(['/', '?', '#']).next()?;
-    let hostport = hostport.rsplit('@').next()?;
-    let host = hostport.split(':').next()?.trim();
+    // 占位符会让 Url::parse 失败；host 部分不含占位符，先去掉花括号再解析。
+    let sanitized = api.replace('{', "").replace('}', "");
+    let parsed = reqwest::Url::parse(&sanitized).ok()?;
+    let host = parsed.host_str()?.trim_matches(['[', ']']).trim();
     if host.is_empty() {
         None
     } else {
@@ -253,19 +280,33 @@ async fn fetch_json(
     }
     // 只有用户在「自定义天气接口」里明确填写的地址才允许本机/内网，
     // 其余调用方（定位、节假日、公共天气）仍按 SSRF 面收口。
-    if allow_local {
+    let allowed_host = if allow_local {
         let allowed = custom_weather_host(&app);
         let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
         if allowed.as_deref() != Some(host.as_str()) {
             return Err("只允许访问自定义天气接口的地址".into());
         }
-    }
+        allowed
+    } else {
+        None
+    };
     if !allow_local && is_blocked_host(&parsed) {
         return Err("不允许访问本机或内网地址".into());
     }
     let redirect = if allow_local {
-        // 用户自填的本机/内网接口允许有限跳转（常见于 http→https 或反向代理）。
-        reqwest::redirect::Policy::limited(5)
+        // 自定义接口允许跳转，但每一跳都必须仍指向同一个自定义 host。
+        let allow = allowed_host.clone();
+        reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 5 {
+                return attempt.stop();
+            }
+            let host = attempt.url().host_str().unwrap_or("").to_ascii_lowercase();
+            if allow.as_deref() == Some(host.as_str()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        })
     } else {
         // 公共地址不跟随重定向：否则 302 到 127.0.0.1 可绕过首跳校验。
         reqwest::redirect::Policy::none()
@@ -297,9 +338,9 @@ async fn fetch_json(
                     return Err("不允许访问本机或内网地址".into());
                 }
             }
-            for addr in pinned {
-                builder = builder.resolve(host, addr);
-            }
+            // resolve_to_addrs 一次保留全部候选地址；循环 resolve 会互相覆盖，
+            // 双栈域名只剩最后一个地址时可能整体连不上。
+            builder = builder.resolve_to_addrs(host, &pinned);
         }
     }
     let client = builder
@@ -389,7 +430,8 @@ fn autostart_output_matches(stdout: &str, exe: &std::path::Path) -> bool {
         .file_name()
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    actual.contains(&expected) || (!name.is_empty() && actual.contains(&name))
+    let non_ascii = exe.to_string_lossy().chars().any(|c| !c.is_ascii());
+    actual.contains(&expected) || (non_ascii && !name.is_empty() && actual.contains(&name))
 }
 
 /// 固定使用系统目录下的 reg.exe，避免 PATH / 工作目录被替换。
@@ -660,7 +702,7 @@ fn already_running() -> bool {
         fn GetLastError() -> u32;
     }
     const ERROR_ALREADY_EXISTS: u32 = 183;
-    let name: Vec<u16> = "Local\\DesktopTodoWidgetSingleInstance\0"
+    let name: Vec<u16> = "Global\\DesktopTodoWidgetSingleInstance\0"
         .encode_utf16()
         .collect();
     let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, name.as_ptr()) };
@@ -838,6 +880,12 @@ mod tests {
         let stdout = "DesktopTodo    REG_SZ    \"C:\\Users\\lenovo\\AppData\\Local\\���\\desktop-todo.exe\"";
         assert!(autostart_output_matches(stdout, &exe));
         assert!(!autostart_output_matches("DesktopTodo REG_SZ \"C:\\Other\\foo.exe\"", &exe));
+        // 纯 ASCII 路径下不同目录的同名 exe 不能误报
+        let ascii = PathBuf::from(r"C:\Apps\desktop-todo.exe");
+        assert!(!autostart_output_matches(
+            "DesktopTodo REG_SZ \"C:\\Old\\desktop-todo.exe\"",
+            &ascii
+        ));
     }
 
     #[test]
@@ -851,6 +899,9 @@ mod tests {
             "http://10.0.0.1/x",
             "http://192.168.1.2/x",
             "http://169.254.1.1/x",
+            "http://100.100.100.200/x",
+            "http://0.1.2.3/x",
+            "http://198.18.0.1/x",
             "http://[::1]/x",
             "http://[fc00::1]/x",
             "http://[fe80::1]/x",

@@ -127,7 +127,7 @@ $desc = if ($conf.bundle.shortDescription) { $conf.bundle.shortDescription } els
 if ($IdentityName -notmatch '^[-_.A-Za-z0-9]{3,50}$') {
   throw "IdentityName 只能包含字母、数字、. _ - 且长度 3-50：$IdentityName（中文名会被 makeappx 拒绝）"
 }
-if ($Publisher -notmatch '^(CN=)?[^,=&<>"]+$') {
+if ($Publisher -notmatch '^[^&<>"]+$') {
   throw "Publisher 格式异常：$Publisher"
 }
 
@@ -164,13 +164,17 @@ if ($Pfxn) {
   if (-not $Password) { throw '使用 -Pfxn 时必须通过 -Password 或 MSIX_CERT_PASSWORD 提供口令' }
   if (-not (Test-Path $signtool)) { throw 'signtool.exe not found' }
   $secure = ConvertTo-SecureString $Password -AsPlainText -Force
+  $beforeThumbs = @(Get-ChildItem Cert:\CurrentUser\My | ForEach-Object { $_.Thumbprint })
   $cert = Import-PfxCertificate -FilePath $Pfxn -Password $secure -CertStoreLocation Cert:\CurrentUser\My -ErrorAction Stop
   try {
     & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint $msix 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)" }
     Write-Host 'signed'
   } finally {
-    Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue
+    # 只删本次新导入的证书，本机原有的同名证书不能动。
+    if ($beforeThumbs -notcontains $cert.Thumbprint) {
+      Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue
+    }
   }
 } else {
   Write-Host '未签名。上架前需要签名，或直接提交到 Partner Center 由微软签名。'

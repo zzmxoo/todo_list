@@ -252,7 +252,7 @@
   let loadFailed = false;
   let undoTodoId = null;
   let undoTimer = null;
-  let lastAct = { id: "", at: 0 };
+  let lastAct = { id: "", at: 0, x: 0, y: 0 };
   let locateToken = 0;
   let autostartTouched = false;
   let calPress = null;
@@ -795,7 +795,11 @@
         state.weather = null;
       } else {
         state.weather.daily = state.weather.daily.filter(
-          (day) => day && typeof day.date === "string"
+          (day) =>
+            day &&
+            typeof day.date === "string" &&
+            Number.isFinite(day.hi) &&
+            Number.isFinite(day.lo)
         );
       }
     }
@@ -854,10 +858,17 @@
 
   async function flushSave() {
     if (loadFailed) return;
+    // 取消尚未触发的防抖保存，避免退出时旧载荷后落盘。
+    clearTimeout(saveTimer);
+    saveTimer = null;
     // 等 drain 合并完成，避免退出时用旧 state 覆盖刚写入的 AI 待办。
     // 退出路径不做超时：多等一会儿无害，丢一条 AI 待办不可恢复。
     while (aiPullBusy) {
       await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    // 等已经在途的写盘结束，再写最新状态。
+    while (saving) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
     await invoke("save_state", { state: serializeState() });
   }
@@ -1544,7 +1555,7 @@
   }
 
   async function doLayout() {
-    if (settingsOpen || edgeHide) return;
+    if (settingsOpen || (edgeHide && !edgeHide.revealed)) return;
 
     const calendarOn = !!state.settings.calendar;
     const minimalOn = !calendarOn && !!state.settings.minimal;
@@ -3221,12 +3232,15 @@
         // 第一下会重建列表，下一行移到同一坐标；若第二下落到不同待办，
         // 按双击吞掉。同一待办上的连续点击仍放行（例如快速改置顶）。
         const now = Date.now();
-        if (event.detail > 1 && id !== lastAct.id && now - lastAct.at < 600) {
-          lastAct = { id, at: now };
+        const sameSpot =
+          Math.abs(event.clientX - (lastAct.x || 0)) < 12 &&
+          Math.abs(event.clientY - (lastAct.y || 0)) < 12;
+        if (event.detail > 0 && id !== lastAct.id && now - lastAct.at < 600 && sameSpot) {
+          lastAct = { id, at: now, x: event.clientX, y: event.clientY };
           event.stopPropagation();
           return;
         }
-        lastAct = { id, at: now };
+        lastAct = { id, at: now, x: event.clientX, y: event.clientY };
         const act = action.dataset.act;
         if (act === "done") toggleDone(id);
         else if (act === "pin") togglePin(id);
@@ -3658,6 +3672,7 @@
     });
 
     els.cityInput.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
         event.preventDefault();
         els.cityInput.blur();
@@ -3668,6 +3683,7 @@
       changeCity();
     });
     els.weatherApiInput.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Enter") {
         event.preventDefault();
         els.weatherApiInput.blur();

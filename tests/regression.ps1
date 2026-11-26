@@ -117,12 +117,12 @@ try {
     $autostartValue = $autostartProp.DesktopTodo
     $autostartSnapshotTaken = $true
   } catch {
-    if ($_.CategoryInfo.Category -eq 'ObjectNotFound') {
+    if ($_.CategoryInfo.Category -in @('ObjectNotFound', 'InvalidArgument')) {
+      // Run 键通常存在、值不存在时 PowerShell 5.1 抛 InvalidArgument
       $autostartExisted = $false
       $autostartSnapshotTaken = $true
     } else {
-      $autostartSnapshotTaken = $false
-      "WARN  读取自启注册表失败，本次不回填：$($_.Exception.Message)"
+      throw "无法读取自启注册表，为避免留下测试自启项已中止：$($_.Exception.Message)"
     }
   }
   $dataExisted = Test-Path -LiteralPath $data
@@ -256,6 +256,19 @@ fetch('quotes.json')
       try { Invoke-RestMethod "http://127.0.0.1:$Port/json" | Out-Null; $ready = $true; break } catch { }
     }
     if (-not $ready) { throw "CDP port $Port not ready for corrupt-data test" }
+    $probeTarget = $false
+    for ($i = 0; $i -lt 20 -and -not $probeTarget; $i++) {
+      Start-Sleep -Milliseconds 200
+      $targets = Invoke-RestMethod "http://127.0.0.1:$Port/json"
+      $probeTarget = [bool]($targets | Where-Object { $_.url -match 'index\.html\?test=1' })
+    }
+    if (-not $probeTarget) { throw "端口 $Port 被其它进程占用（探针页面未就绪）" }
+    $appReady = $false
+    for ($i = 0; $i -lt 25 -and -not $appReady; $i++) {
+      Start-Sleep -Milliseconds 200
+      try { $appReady = (Eval-Expr "document.getElementById('app') ? 'ok' : ''") -eq 'ok' } catch { }
+    }
+    if (-not $appReady) { throw "探针页面 #app 未就绪" }
     $corruptExpr = @'
 (async () => {
   const err = document.getElementById('loadError');
@@ -277,7 +290,9 @@ fetch('quotes.json')
     Start-Sleep -Milliseconds 600
     $recreated = Test-Path -LiteralPath $probeData
     $inboxKept = @(Get-ChildItem -LiteralPath (Join-Path $probeDir 'ai-inbox') -Filter '*.json' -ErrorAction SilentlyContinue).Count -gt 0
-    if ($corruptUi.visible -and $corruptUi.ready -and $kept -and -not $recreated -and $inboxKept) {
+    $corruptFile = Get-ChildItem -LiteralPath $probeDir -Filter 'data.json.corrupt-*' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $corruptContentOk = $corruptFile -and ((Get-Content $corruptFile.FullName -Raw -Encoding UTF8) -eq '{ broken json')
+    if ($corruptUi.visible -and $corruptUi.ready -and $kept -and $corruptContentOk -and -not $recreated -and $inboxKept) {
       $passed += 1
       $extraCases += 1
       'PASS  [REG-46] data.json 损坏时显示告警、保留原文件且不写盘  [corrupt kept, inbox kept]'

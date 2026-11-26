@@ -395,6 +395,10 @@ mod tests {
         let text = fs::read_to_string(home.join(".dsh").join("desktop-todo.mcp.yml")).unwrap();
         assert!(text.contains("serverName: desktop-todo"));
         assert!(text.contains("--mcp"));
+        assert!(!home
+            .join(".dsh")
+            .join("desktop-todo.mcp.yml.tmp")
+            .exists());
         let _ = fs::remove_dir_all(home);
     }
 }

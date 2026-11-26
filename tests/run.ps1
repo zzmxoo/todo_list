@@ -10,6 +10,12 @@ if (-not $owned) { throw '另一个回归进程正在运行（run.ps1 / integrat
 $cdp = Join-Path (Split-Path $PSScriptRoot -Parent) '_dev_cdp.ps1'
 . (Join-Path $PSScriptRoot 'regress-lib.ps1')
 
+# 端口可能被别的 Chromium 调试页占用；必须确认是我们的 ?test=1 页面。
+$targets = Invoke-RestMethod "http://127.0.0.1:$Port/json"
+if (-not ($targets | Where-Object { $_.url -match 'index\.html\?test=1' })) {
+  throw "端口 $Port 被其它进程占用（未找到本应用的 ?test=1 页面）"
+}
+
 function Eval-Expr([string]$expr) {
   # Windows 命令行上限约 32KB，统一走临时文件。
   $tempPath = $env:TEMP

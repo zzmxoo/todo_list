@@ -369,7 +369,7 @@
       await sleep(120);
       const scrollBefore = list.scrollTop;
       const canScroll = scrollBefore > 0;
-      if (!canScroll) return 'skip: list not scrollable';
+      ok(canScroll, 'fixture must overflow: 12 条待办要撑出滚动条');
       const target = findRow(names[0]);
       target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
       let input = null;
@@ -388,13 +388,11 @@
       const kept = $('.edit-input');
       ok(keptWait >= 0 && kept, 'edit input preserved after re-render');
       eq(kept.value, 'ITEST-编辑中', 'edit value preserved');
-      if (canScroll) {
-        ok(
-          list.scrollTop >= scrollBefore - 1,
-          'scroll preserved: ' + list.scrollTop + ' vs ' + scrollBefore
-        );
-      }
-      return canScroll ? 'edit+scroll preserved' : 'edit preserved (list not scrollable)';
+      ok(
+        list.scrollTop >= scrollBefore - 1,
+        'scroll preserved: ' + list.scrollTop + ' vs ' + scrollBefore
+      );
+      return 'edit+scroll preserved';
     } finally {
       const active = $('.edit-input');
       if (active) {
@@ -1100,6 +1098,7 @@
       // 先确保 networkOk 处于可用状态
       mode = null;
       const input = $('#cityInput');
+      ok(input, 'city input');
       if (input) {
         input.value = '上海';
         input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1113,7 +1112,12 @@
       if (input) {
         input.value = '广州';
         input.dispatchEvent(new Event('change', { bubbles: true }));
-        await waitFor(() => (($('#wcStatus') || {}).textContent || '').includes('HTTP'), 20000, 250);
+        const surfaced = await waitFor(
+          () => (($('#wcStatus') || {}).textContent || '').includes('HTTP'),
+          20000,
+          250
+        );
+        ok(surfaced >= 0, '4xx not surfaced: ' + (($('#wcStatus') || {}).textContent || ''));
       }
       await sleep(300);
       ok(infoFires(), '4xx must not disable hover info');
@@ -1581,10 +1585,9 @@
     const revealed = await waitFor(async () => (await w.outerPosition()).x > hiddenX + 100, 2000, 100);
     ok(revealed >= 0, 'tray revealed');
     if ($('#app').matches(':hover')) {
+      // 光标可能压在窗口上导致自动收起顺延；先把窗口挪开，5 秒计时会继续。
       await w.setPosition(new PPos(500, 400));
       await sleep(800);
-      await w.setPosition(new PPos(orig.x, orig.y));
-      return 'skip auto-hide: cursor hovering';
     }
     const hiddenAgain = await waitFor(async () => (await w.outerPosition()).x < 0, 7000, 200);
     ok(hiddenAgain >= 0, 'auto-hidden after ~5s');

@@ -47,12 +47,11 @@ try {
     $autostartValue = $autostartProp.DesktopTodo
     $autostartSnapshotTaken = $true
   } catch {
-    if ($_.CategoryInfo.Category -eq 'ObjectNotFound') {
+    if ($_.CategoryInfo.Category -in @('ObjectNotFound', 'InvalidArgument')) {
       $autostartExisted = $false
       $autostartSnapshotTaken = $true
     } else {
-      $autostartSnapshotTaken = $false
-      Write-Warning "读取自启注册表失败，本次不回填：$($_.Exception.Message)"
+      throw "无法读取自启注册表，为避免留下测试自启项已中止：$($_.Exception.Message)"
     }
   }
   $dataExisted = Test-Path -LiteralPath $data

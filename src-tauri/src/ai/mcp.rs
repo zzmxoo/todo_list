@@ -156,7 +156,7 @@ fn list_open_todos(dir: &Path) -> Result<Value, String> {
     // list 是只读工具：不能调用 read_state_root（损坏时会隔离文件）。
     let path = dir.join("data.json");
     let stored = match std::fs::read(&path) {
-        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+        Ok(bytes) => match serde_json::from_slice::<Value>(inbox::strip_bom(&bytes)) {
             Ok(root) => root
                 .get("todos")
                 .and_then(Value::as_array)

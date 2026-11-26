@@ -16,7 +16,7 @@
 
 ## 二、我们在本机存储的信息
 
-以下信息保存在你的电脑上。主数据在 `%APPDATA%\com.desktoptodo.widget\`，AI 收件箱在 `%USERPROFILE%\.desktoptodo\ai-inbox\`。我们无法访问这些数据。
+以下信息保存在你的电脑上。主数据在 `%APPDATA%\com.desktoptodo.widget\`，AI 收件箱在 `%USERPROFILE%\.desktoptodo\ai-inbox\`。我们无法访问这些数据。商店（MSIX）版可能由 Windows 把 AppData 重定向到 `%LOCALAPPDATA%\Packages\<包族>\LocalCache\Roaming\...`，可用程序里的“打开数据目录”定位实际位置。
 
 | 数据 | 内容 | 用途 |
 | --- | --- | --- |

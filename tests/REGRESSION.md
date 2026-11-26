@@ -110,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-84 | MSIX 拒绝 major≥1 的映射；测试 exe 缓存包含脚本自身改动 | 本次修复 | `build-msix.ps1` / `build-test-exe.ps1` |
 | REG-85 | tray 初始化失败提示、任务栏与托盘换序回滚、capabilities 允许 destroy、自定义天气允许有限跳转、`1:00` 时长、自启路径比对、退出 flush 不超时、悬停 grace 复位、文本强制转字符串、预报首行兜底 | 本次修复 | Rust 时长/地址用例；`unit-core`；人工手测 |
 | REG-86 | 天气预报按「本地今天 + 第 i 天」映射日历日期，城市时区与系统不同也不会丢天气图标 | 本次修复 | 人工切换异地城市；代码审查 `localWeatherDayKey` |
-| REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 50 条 |
+| REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 51 条 |
 | REG-88 | 自启回读整路径编码损坏时退化为文件名匹配，中文安装路径不会恒显示「已关闭」 | 本次修复 | Rust `autostart_output_falls_back_to_ascii_file_name` |
 | REG-89 | 损坏备份窗口放宽到 30 天，mtime 刷新失败会打印告警，不会刚隔离就“过期” | 本次修复 | Rust `stale_corrupt_backup...`（31 天）+ 代码审查 |
 | REG-90 | 边缘收起期间被跳过的布局，弹出后补跑 `scheduleLayout()` | 本次修复 | 人工：贴边收起时 AI 写入待办 |
@@ -119,6 +119,11 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-93 | 公开 Release 前校验 `desktop-todo_<ver>-setup.exe` 与 `desktop-todo_<ver>.exe` 两个资产 | 本次修复 | `.github/workflows/release.yml` |
 | REG-94 | 任务栏取消不回滚、托盘惰性重建、卸载清理自启项、list_todos 只读不隔离、DSH 配置原子写、旧收件箱迁移兜底、DNS 解析失败报错、`allow_local` 只允许自定义天气 host、双击/非字符串 id/输入法/GPS 竞态/断网悬浮信息 | 本次修复 | Rust 单测 + REG-43 + 人工手测 |
 | REG-95 | 拖动主界面进入边缘后开始计时；超时若左键仍按下不收起，松开鼠标后才按最终位置收起 | 本次修复 | Rust `left_button_down`；人工按住鼠标拖到上/左/右边缘验证 |
+| REG-96 | 自启快照把「Run 键存在但值不存在」（InvalidArgument）视为未配置；真正读失败直接中止，不留下测试自启项 | 本次修复 | `regression.ps1` / `integration.ps1` 快照分支 |
+| REG-97 | `save_state` 拒绝非对象载荷，渲染层回归不能写坏 data.json | 本次修复 | 代码审查 + Rust 命令层 |
+| REG-98 | 公网 DNS 多地址一次钉入（不互相覆盖）；自定义天气跳转只允许同 host；BOM JSON 可恢复；mtime 刷不上时复制成新备份 | 本次修复 | Rust 单测/代码审查 |
+| REG-99 | 边缘已弹出时布局照常重排；`flushSave` 清防抖并等 `saving`；click 防护使用同坐标时间窗 | 本次修复 | REG-49 / REG-67 / 人工边缘天气卡验证 |
+| REG-100 | Publisher 允许完整 DN；REG-38 校验 4xx 真实发生；REG-46 等 `?test=1` 页面和 `#app`；REG-33/49 不转 skip；MSIX 用脚本返回路径 | 本次修复 | 对应脚本与用例 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 
