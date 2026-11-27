@@ -958,6 +958,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nsis_hooks_do_not_depend_on_logiclib() {
+        // Tauri 的 installer.nsi 没有 include LogicLib，hooks 里用 ${If}/${IfNot}
+        // 会让 makensis 报 `macro "_If" requires 4 parameter(s)`，必须在本地拦住。
+        let hooks = include_str!("../nsis/hooks.nsh");
+        // 注释里可以提到这些宏名，只看实际脚本行。
+        let code: String = hooks
+            .lines()
+            .filter(|line| !line.trim_start().starts_with(';'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!code.contains("${If"), "NSIS hooks 不能使用 LogicLib 宏");
+        assert!(code.contains("$UpdateMode"), "升级卸载要用 $UpdateMode 判断");
+    }
+
+    #[test]
     fn ease_in_out_hits_endpoints_and_midpoint() {
         assert!((ease_in_out(0.0) - 0.0).abs() < 1e-12);
         assert!((ease_in_out(1.0) - 1.0).abs() < 1e-12);
