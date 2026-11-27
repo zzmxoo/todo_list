@@ -1597,6 +1597,18 @@
   async function doLayout() {
     if (settingsOpen || (edgeHide && !edgeHide.revealed)) return;
 
+    // todo-card 的宽度在普通/极简之间切换时有 180ms 过渡。若直接测量，
+    // 拿到的是过渡中的旧宽度，窗口会比卡片窄，右侧按钮被裁掉（REG-114）。
+    // 测量期间关闭过渡，量完立刻恢复；宽度已是终值，恢复不会再触发过渡。
+    els.app.classList.add("measuring");
+    try {
+      await layoutNow();
+    } finally {
+      els.app.classList.remove("measuring");
+    }
+  }
+
+  async function layoutNow() {
     const calendarOn = !!state.settings.calendar;
     const minimalOn = !calendarOn && !!state.settings.minimal;
     // 告警条是正常流里的 flex 子项，窗口高度必须把它算进去，

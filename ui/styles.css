@@ -235,6 +235,10 @@ body {
   transition: width 180ms ease;
 }
 
+/* 布局测量期间关闭宽度过渡：否则会按过渡中的旧宽度决定窗口大小，
+   卡片右侧（含设置按钮）会被窗口裁掉。 */
+#app.measuring .todo-card { transition: none; }
+
 .todo-header {
   height: 48px;
   flex: 0 0 48px;
@@ -468,7 +472,11 @@ body.minimal-mode .ai-tag {
 .todo-row.overdue .due-label { color: #f08d8d; }
 
 .todo-row .actions {
-  flex: 0 0 96px;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 96px;
   margin-left: 0;
   display: flex;
   align-items: center;
@@ -480,7 +488,9 @@ body.minimal-mode .ai-tag {
   pointer-events: none;
 }
 
-.todo-row:hover .due-label { display: none; }
+/* 时间与操作区共用右侧同一块空间；隐藏用 visibility，避免文本宽度重排。 */
+.todo-row:hover .due-label,
+.todo-row:focus-within .due-label { visibility: hidden; }
 .todo-row:hover .actions,
 .todo-row:focus-within .actions {
   opacity: 1;
@@ -626,7 +636,11 @@ body.minimal-mode .ai-tag {
 
 /* -------------------------------------------------------- minimal mode */
 /* 极简模式：每条待办只占一行，超出省略；添加行紧跟在最后一条下面。 */
-body.minimal-mode .todo-card { min-height: 0; }
+body.minimal-mode .todo-card {
+  min-height: 0;
+  /* 左边界到文字末端 230px；右侧 8px 间距 + 图标区 86px + 行/列表右内边距 16px */
+  width: 342px;
+}
 
 body.minimal-mode .todo-row {
   min-height: 24px;
@@ -662,6 +676,10 @@ body.minimal-mode .todo-row .text {
   font-size: 12.5px;
   line-height: 18px;
   padding: 0;
+  /* 卡片左边界到文字末端 232px，减去左侧 42px 后文字本身 190px；
+     右侧留 8px 间距 + 86px 图标区，超出用省略号。 */
+  max-width: 190px;
+  margin-right: 94px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -669,14 +687,14 @@ body.minimal-mode .todo-row .text {
 }
 
 body.minimal-mode .todo-row .due-label {
-  flex-basis: 88px;
-  font-size: 10px;
-  line-height: 18px;
-  padding-top: 0;
+  /* 极简模式不显示截止时间，操作按钮悬停时占用右侧同一区域。 */
+  display: none;
 }
 
 body.minimal-mode .todo-row .actions {
-  flex-basis: 88px;
+  /* 4 个图标 × 20px + 3 个 2px 间距，正好是图标本身的宽度 */
+  width: 86px;
+  right: 8px;
   height: 18px;
 }
 

@@ -254,22 +254,24 @@
   await t('[REG-02] 已完成待办从列表隐藏且计数正确', async () => {
     const text = 'ITEST-完成隐藏';
     const row = await addTodo(text);
-    row.querySelector('.act-btn.done').click();
-    await sleep(300);
-    const st = await invoke('load_state');
-    ok(
-      ((st && st.todos) || []).some((todo) => todo.text === text && todo.done === true),
-      'disk keeps done item'
-    );
-    ok(!findRow(text), 'done item hidden from list');
-    eq($$('.todo-row.done').length, 0, 'no done rows rendered');
-    const countText = $('#count').textContent;
-    const count = countText ? parseInt(countText, 10) : 0;
-    eq(count, $$('.todo-row').length, 'count matches open rows');
-    if (!$('#undoToast').hidden) click($('#undoBtn'));
-    await sleep(250);
-    await deleteTodo(text);
-    return count + ' items';
+    try {
+      row.querySelector('.act-btn.done').click();
+      const persisted = await waitFor(async () => {
+        const st = await invoke('load_state');
+        return ((st && st.todos) || []).some((todo) => todo.text === text && todo.done === true);
+      }, 4000, 100);
+      ok(persisted >= 0, 'disk keeps done item');
+      ok(!findRow(text), 'done item hidden from list');
+      eq($$('.todo-row.done').length, 0, 'no done rows rendered');
+      const countText = $('#count').textContent;
+      const count = countText ? parseInt(countText, 10) : 0;
+      eq(count, $$('.todo-row').length, 'count matches open rows');
+      return count + ' items';
+    } finally {
+      if (!$('#undoToast').hidden) click($('#undoBtn'));
+      await sleep(250);
+      await deleteTodo(text);
+    }
   });
 
   await t('[REG-45] AI 通过收件箱插入待办并显示来源', async () => {
@@ -295,34 +297,48 @@
     await addTodo('ITEST-置顶锚点');
     const row = await addTodo('ITEST-新增');
     ok(row, 'created');
-    const pinBtn = () => findRow('ITEST-新增').querySelector('.act-btn.pin');
-    const idxBefore = todoTexts().indexOf('ITEST-新增');
-    ok(idxBefore > 0, 'baseline has item before pinned one');
-    click(pinBtn());
-    await sleep(220);
-    ok(pinBtn().classList.contains('on'), 'pin on');
-    const idxPinned = todoTexts().indexOf('ITEST-新增');
-    ok(idxPinned < idxBefore, 'moved above baseline when pinned: ' + idxPinned + ' vs ' + idxBefore);
-    click(pinBtn());
-    await sleep(220);
-    ok(!pinBtn().classList.contains('on'), 'pin off');
-    const target = findRow('ITEST-新增');
-    target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    let edit = null;
-    for (let i = 0; i < 10 && !edit; i += 1) {
-      await sleep(100);
-      edit = $('.edit-input');
+    try {
+      const pinBtn = () => findRow('ITEST-新增').querySelector('.act-btn.pin');
+      const idxBefore = todoTexts().indexOf('ITEST-新增');
+      ok(idxBefore > 0, 'baseline has item before pinned one');
+      click(pinBtn());
+      await sleep(220);
+      ok(pinBtn().classList.contains('on'), 'pin on');
+      const idxPinned = todoTexts().indexOf('ITEST-新增');
+      ok(idxPinned < idxBefore, 'moved above baseline when pinned: ' + idxPinned + ' vs ' + idxBefore);
+      click(pinBtn());
+      await sleep(220);
+      ok(!pinBtn().classList.contains('on'), 'pin off');
+      let edit = null;
+      for (let attempt = 0; attempt < 3 && !edit; attempt += 1) {
+        const target = findRow('ITEST-新增');
+        target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        for (let i = 0; i < 8 && !edit; i += 1) {
+          await sleep(100);
+          edit = $('.edit-input');
+        }
+      }
+      ok(edit, 'edit input');
+      edit.value = 'ITEST-改后';
+      edit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await sleep(250);
+      ok(findRow('ITEST-改后'), 'edited');
+      await deleteTodo('ITEST-改后');
+      ok(!findRow('ITEST-改后'), 'deleted');
+      await deleteTodo('ITEST-置顶锚点');
+      ok(!findRow('ITEST-置顶锚点'), 'anchor deleted');
+      return 'ok';
+    } catch (err) {
+      const active = $('.edit-input');
+      if (active) {
+        active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await sleep(150);
+      }
+      await deleteTodo('ITEST-改后');
+      await deleteTodo('ITEST-新增');
+      await deleteTodo('ITEST-置顶锚点');
+      throw err;
     }
-    ok(edit, 'edit input');
-    edit.value = 'ITEST-改后';
-    edit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await sleep(250);
-    ok(findRow('ITEST-改后'), 'edited');
-    await deleteTodo('ITEST-改后');
-    ok(!findRow('ITEST-改后'), 'deleted');
-    await deleteTodo('ITEST-置顶锚点');
-    ok(!findRow('ITEST-置顶锚点'), 'anchor deleted');
-    return 'ok';
   });
 
   await t('[REG-04] 输入中的待办草稿不会被后台重绘清空', async () => {
@@ -1770,6 +1786,56 @@
     eq(window.__TEST_NORMALIZE_WEATHER({ daily: 'bad' }), null);
     eq(window.__TEST_NORMALIZE_WEATHER({ daily: [], current: {} }) !== null, true);
     return 'weather shape guarded';
+  });
+
+  await t('[REG-114] 极简模式卡片不能被窗口裁掉，文字不遮挡操作按钮', async () => {
+    // todo-card 宽度切换有 180ms 过渡。曾按过渡中的旧宽度设置窗口，
+    // 卡片 412px 而窗口只有 400px，右侧设置按钮和行内操作被裁掉。
+    // REG-34 结束时会保持天气卡打开，窗口宽度会多出天气那一列；先收起。
+    await ensureWeather(false);
+    await ensureMinimal(true);
+    await sleep(500);
+    ok(document.body.classList.contains('minimal-mode'), 'minimal class');
+    const card = document.querySelector('.todo-card').getBoundingClientRect();
+    const winW = window.innerWidth;
+    ok(card.right <= winW + 1, 'card right=' + card.right + ' > window=' + winW);
+    const gear = $('#settingsBtn').getBoundingClientRect();
+    ok(gear.right <= winW + 1, 'settings button clipped: ' + gear.right + ' > ' + winW);
+    ok(
+      Math.abs(winW - (card.width + 24)) <= 1,
+      'window=' + winW + ' card=' + card.width + ' (expect card + 2*12 margin)'
+    );
+    // 卡片 342px：左边界到文字末端 232px，右侧是 8px 间距 + 86px 图标区。
+    eq(Math.round(card.width), 342, 'minimal card width');
+    const longText = 'ITEST-极简超长-' + '测试文字'.repeat(40);
+    const row = await addTodo(longText);
+    try {
+      const textEl = row.querySelector('.text');
+      const style = getComputedStyle(textEl);
+      eq(style.whiteSpace, 'nowrap', 'no wrap');
+      eq(style.textOverflow, 'ellipsis', 'ellipsis');
+      ok(textEl.scrollWidth > textEl.clientWidth, 'long text overflows: ' + textEl.scrollWidth);
+      const textRect = textEl.getBoundingClientRect();
+      // 列表滚动条（scrollbar-gutter: stable）会吃掉几个像素，文字可能比 232
+      // 略窄；上限仍是左边界 232px，且不能被压得过窄。
+      ok(
+        textRect.right <= card.left + 232 + 1,
+        'text passes left+232: ' + (textRect.right - card.left)
+      );
+      ok(
+        textRect.right >= card.left + 180,
+        'text too narrow: ' + (textRect.right - card.left)
+      );
+      const act = row.querySelector('.actions').getBoundingClientRect();
+      eq(Math.round(act.width), 86, 'actions width = icon cluster');
+      ok(act.left >= textRect.right + 6, 'actions overlap text: gap=' + (act.left - textRect.right));
+      ok(act.right <= card.right, 'actions clipped: ' + act.right + ' > ' + card.right);
+    } finally {
+      await deleteTodo(longText);
+    }
+    await ensureMinimal(false);
+    await sleep(400);
+    return `win=${winW} card=${Math.round(card.width)}`;
   });
 
   await t('[REG-57] 只读告警提供解除入口，并禁用设置与待办操作', async () => {
