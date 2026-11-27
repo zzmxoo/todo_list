@@ -1,4 +1,4 @@
-# 桌面待办小组件
+﻿# 桌面待办小组件
 
 Windows 桌面待办小工具，Tauri 2 + WebView2 实现。深色玻璃拟态界面，无边框、置顶、可拖动。
 
@@ -71,7 +71,7 @@ cargo build --release  # 发布版：target\release\desktop-todo.exe
 
 前端在 `ui/` 目录（纯 HTML/CSS/JS，无 Node 构建步骤）；Tauri 配置、Rust 命令在 `src-tauri/`。纯函数集中在 `ui/core.js`；待办、日历、节假日、每日一句的领域规则在 `ui/domain/`（todo / calendar / holiday / quote），只处理普通对象、不碰 DOM；天气解析与各数据源适配集中在 `ui/weather.js`（`WeatherAPI`）。待办写操作统一走 `commitTodos()`，负责保存、重绘与布局。
 
-单元测试在 `tests/` 下，借 WebView2 的 JS 引擎运行。完整回归会先跑备份守卫自测、快照注册表自启、备份用户数据，再构建测试版并跑 Rust 纯函数单测、49 条 JS 单元测试与 49 条 UI 集成回归，结束后恢复数据/注册表并按测试前状态重启：
+单元测试在 `tests/` 下，借 WebView2 的 JS 引擎运行。完整回归会先跑备份守卫自测、快照注册表自启、备份用户数据，再构建测试版并跑 Rust 纯函数单测、50 条 JS 单元测试与 49 条 UI 集成回归，结束后恢复数据/注册表并按测试前状态重启：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\regression.ps1

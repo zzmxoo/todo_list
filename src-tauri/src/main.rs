@@ -555,6 +555,12 @@ fn reg_exe() -> PathBuf {
 }
 
 static WINDOW_ANIM_GEN: AtomicU64 = AtomicU64::new(0);
+static QUIT_GEN: AtomicU64 = AtomicU64::new(0);
+
+#[tauri::command]
+fn cancel_quit() {
+    QUIT_GEN.fetch_add(1, Ordering::SeqCst);
+}
 
 /// 在 Rust 侧逐帧移动窗口，避免每帧一次 IPC 在系统繁忙时造成抖动。
 #[tauri::command]
@@ -739,12 +745,15 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
             "quit" => {
-                // 前端先 flush 未落盘的改动；3 秒后兜底退出，避免页面卡死关不掉。
+                // 前端先 flush 未落盘的改动；8 秒后兜底退出，前端可 cancel_quit 取消。
                 let _ = app.emit("tray-quit", ());
+                let gen = QUIT_GEN.load(Ordering::SeqCst);
                 let handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-                    handle.exit(0);
+                    if QUIT_GEN.load(Ordering::SeqCst) == gen {
+                        handle.exit(0);
+                    }
                 });
             }
             _ => {}
@@ -899,10 +908,13 @@ fn main() {
                 // 先让前端 flush 未落盘的改动，再真正销毁；3 秒兜底避免卡死关不掉。
                 api.prevent_close();
                 let _ = window.emit("window-close-request", ());
+                let gen = QUIT_GEN.load(Ordering::SeqCst);
                 let win = window.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-                    let _ = win.destroy();
+                    if QUIT_GEN.load(Ordering::SeqCst) == gen {
+                        let _ = win.destroy();
+                    }
                 });
             }
         })
@@ -928,6 +940,7 @@ fn main() {
             cancel_window_anim,
             set_taskbar_hidden,
             quit_app,
+            cancel_quit,
             get_autostart,
             set_autostart
         ])

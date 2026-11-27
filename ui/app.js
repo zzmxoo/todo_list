@@ -715,8 +715,8 @@
     renderCalendar();
     renderWeatherCard();
     renderWeatherPill();
-    await restorePosition();
     await refreshMonitorBounds();
+    await restorePosition();
     await scheduleLayout();
     try {
       if (win) await win.setAlwaysOnTop(!!state.settings.always_on_top);
@@ -742,7 +742,7 @@
     tick();
     await pullAiTodos();
     setInterval(tick, 1000);
-    setInterval(updateRowStates, 15000);
+    // updateRowStates 已由 tick 每 15 秒驱动，不再重复注册定时器。
     setInterval(() => { if (!weatherBusy) refreshWeather(); }, 30 * 60 * 1000);
     setInterval(savePosition, 10000);
 
@@ -841,6 +841,7 @@
       saving = true;
       try {
         await invoke("save_state", { state: serializeState() });
+        state.__raw = serializeState();
         saveFailures = 0;
         clearTimeout(saveRetryTimer);
         saveRetryTimer = null;
@@ -997,6 +998,12 @@
       // pickMonitor 与 availableMonitors 都是物理像素，不能喂逻辑 rect。
       pos = await win.outerPosition();
       size = await win.outerSize();
+      const sx = Number(state.settings.x);
+      const sy = Number(state.settings.y);
+      if (Number.isFinite(sx) && Number.isFinite(sy)) {
+        const scale = (await win.scaleFactor()) || 1;
+        pos = { x: sx * scale, y: sy * scale };
+      }
     } catch (err) {
       /* ignore */
     }
@@ -1168,7 +1175,9 @@
   function monitorList() {
     try {
       const api = tauri.window;
-      return api && api.availableMonitors ? api.availableMonitors() : Promise.resolve([]);
+      return api && api.availableMonitors
+        ? Promise.resolve(api.availableMonitors()).catch(() => [])
+        : Promise.resolve([]);
     } catch (err) {
       return Promise.resolve([]);
     }
@@ -1427,9 +1436,13 @@
   // 超时到达边缘但左键仍按着：等松开再收起；期间窗口被拖走则按最新位置重算。
   async function deferEdgeHide(edge) {
     const token = ++edgeDeferToken;
+    const started = Date.now();
     while (token === edgeDeferToken) {
       if (!(await leftHeld())) break;
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      // 长按不松开时降低轮询频率，避免每 80ms 一次 IPC，但仍等松开再收起。
+      await new Promise((resolve) =>
+        setTimeout(resolve, Date.now() - started > 3000 ? 500 : 80)
+      );
     }
     if (token !== edgeDeferToken || !win) return;
     if (edge === "top") {
@@ -1759,6 +1772,7 @@
   if (TEST_MODE) {
     window.__TEST_RENDER_TODOS = renderTodos;
     window.__TEST_LOAD_ERROR = showLoadError;
+    window.__TEST_NETWORK_OK = () => networkOk;
     window.__TEST_NORMALIZE_WEATHER = (weather) => {
       const prev = state.weather;
       state.weather = weather;
@@ -2456,7 +2470,7 @@
     }
     const info = wmoInfo(data.current.code);
     els.pillIcon.innerHTML = wxIcon(info.kind, 15);
-    els.pillText.textContent = `${data.current.temp}°`;
+    els.pillText.textContent = `${data.current.temp ?? "--"}°`;
     els.weatherPill.title = `${data.city || state.settings.city} · 点击显示/隐藏天气`;
   }
 
@@ -3076,6 +3090,7 @@
           const [rawLat, rawLon] = source.coords(data);
           const coords = window.WeatherAPI.pickCoords({ latitude: rawLat, longitude: rawLon });
           if (name && coords) {
+            if (token !== locateToken) return; // 用户已手动改城市，丢弃迟到的 IP 结果
             state.settings.latitude = coords.lat;
             state.settings.longitude = coords.lon;
             applyCity(name);
@@ -3090,7 +3105,7 @@
         }
       }
       // 3) 所有 IP 服务都失败 → 退回 GPS
-      useGps();
+      useGps(token);
     })();
   }
 
@@ -3122,8 +3137,9 @@
   }
 
   /** IP 定位不可用时退回：GPS 拿坐标，再反查城市名。 */
-  function useGps() {
+  function useGps(token) {
     const fail = (msg) => {
+      if (token !== locateToken) return; // 用户已手动改城市，丢弃迟到的结果
       setWcStatus(msg);
       setLocateHint(msg + "。可在下方直接输入城市名，或检查 Windows「设置 → 隐私和安全性 → 定位」是否已开启。");
       els.cityInput.value = state.settings.city || "";
@@ -3134,6 +3150,7 @@
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        if (token !== locateToken) return; // 用户已手动改城市，GPS 坐标不得覆盖
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
         state.settings.latitude = lat;
@@ -3242,9 +3259,9 @@
   }
 
   function tick() {
-    pullAiTodos();
-    updateClock();
     tickCount += 1;
+    if (tickCount % 3 === 0) pullAiTodos();
+    if (state.settings.weather_open && !state.settings.calendar) updateClock();
     if (new Date().toDateString() !== lastDay) {
       lastDay = new Date().toDateString();
       holidayCheckToday();
@@ -3782,24 +3799,35 @@
 
   // 全局：点击外部关闭弹窗、Esc、位置保存与退出前保存
   function bindWindowEvents() {
+    window.addEventListener("online", () => holidayCheckToday());
     if (tauri.event) {
       tauri.event.listen("tray-show", handleTrayShow).catch(() => {});
       tauri.event.listen("tray-quit", async () => {
+        let canExit = true;
         try {
           await flushSave();
         } catch (err) {
           console.warn("flush before quit failed", err);
           showSaveError();
+          // 先停掉 Rust 侧 8 秒兜底，避免确认框未决时窗口/进程被兜底销毁。
+          await invoke("cancel_quit").catch(() => {});
+          canExit = window.confirm("保存失败，最近的修改可能未写入磁盘。仍要退出吗？");
         }
+        if (!canExit) return;
         invoke("quit_app").catch(() => {});
       }).catch(() => {});
       tauri.event.listen("window-close-request", async () => {
+        let canExit = true;
         try {
           await flushSave();
         } catch (err) {
           console.warn("flush before close failed", err);
           showSaveError();
+          // 先停掉 Rust 侧 8 秒兜底，避免确认框未决时窗口被兜底销毁。
+          await invoke("cancel_quit").catch(() => {});
+          canExit = window.confirm("保存失败，最近的修改可能未写入磁盘。仍要退出吗？");
         }
+        if (!canExit) return;
         if (win) await win.destroy();
       }).catch(() => {});
     }

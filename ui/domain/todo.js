@@ -19,7 +19,16 @@
 
   function parseDue(todo) {
     if (!todo || !todo.due) return null;
-    const d = new Date(todo.due);
+    const raw = String(todo.due);
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+    if (m) {
+      const year = Number(m[1]);
+      const month = Number(m[2]);
+      const day = Number(m[3]);
+      const maxDay = new Date(year, month, 0).getDate();
+      if (month < 1 || month > 12 || day < 1 || day > maxDay) return null;
+    }
+    const d = new Date(raw);
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
@@ -72,7 +81,7 @@
     if (mins < 24 * 60) {
       const h = Math.floor(mins / 60);
       const m = Math.round(mins % 60);
-      return m >= 10 ? `${h}时${m}分` : `${h}时`;
+      return m > 0 ? `${h}时${m}分` : `${h}时`;
     }
     return `${Math.round(mins / 1440)}天`;
   }

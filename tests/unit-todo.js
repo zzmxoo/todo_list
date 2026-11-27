@@ -22,6 +22,8 @@
     eq(api.parseDue(null), null);
     eq(api.parseDue({ due: '' }), null);
     eq(api.parseDue({ due: 'not-a-date' }), null);
+    eq(api.parseDue({ due: '2026-02-30T10:00' }), null);
+    eq(api.parseDue({ due: '2026-13-01T10:00' }), null);
     ok(api.parseDue({ due: '2026-11-18T09:00:00' }) instanceof Date, 'valid');
   });
 

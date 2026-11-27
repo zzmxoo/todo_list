@@ -216,6 +216,20 @@ fn find_corrupt_backup(path: &Path) -> Option<PathBuf> {
     found.pop()
 }
 
+fn backup_snapshot(path: &Path) -> PathBuf {
+    path.with_extension("json.bak")
+}
+
+fn snapshot_is_readable(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(backup_snapshot(path)) else {
+        return false;
+    };
+    match serde_json::from_slice::<Value>(strip_bom(&bytes)) {
+        Ok(value) => value.is_object() && value.get("todos").map(Value::is_array).unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
 fn missing_state_error(path: &Path, saved: &Path) -> String {
     format!(
         "{} 不存在，但发现损坏备份 {}；请先恢复该文件后再启动",
@@ -233,6 +247,12 @@ pub fn read_state_root(path: &Path) -> Result<Value, String> {
     if !path.exists() {
         if let Some(saved) = find_corrupt_backup(path) {
             return Err(missing_state_error(path, &saved));
+        }
+        if snapshot_is_readable(path) {
+            return Err(
+                "data.json 缺失，但发现上一版快照 data.json.bak；请确认后把备份改名为 data.json 再启动"
+                    .into(),
+            );
         }
         return Ok(json!({}));
     }
@@ -255,6 +275,12 @@ pub fn ensure_overwritable(path: &Path) -> Result<(), String> {
     if !path.exists() {
         if let Some(saved) = find_corrupt_backup(path) {
             return Err(missing_state_error(path, &saved));
+        }
+        if snapshot_is_readable(path) {
+            return Err(
+                "data.json 缺失，但发现上一版快照 data.json.bak；已停止写入，请先恢复备份"
+                    .into(),
+            );
         }
         return Ok(());
     }
@@ -535,6 +561,21 @@ mod tests {
             .expect("quarantined data");
         assert!(fs::read_to_string(corrupt).unwrap().contains("keep"));
         assert!(dir.join("ai-inbox").join("ai-bad.json").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn missing_data_with_bak_snapshot_enters_read_only() {
+        let dir = test_dir("bak-recover");
+        let data_path = dir.join("data.json");
+        fs::write(
+            dir.join("data.json.bak"),
+            r#"{"todos":[{"id":"keep","text":"旧快照"}]}"#,
+        )
+        .unwrap();
+        let err = read_state_root(&data_path).unwrap_err();
+        assert!(err.contains("data.json.bak"), "unexpected: {err}");
+        assert!(ensure_overwritable(&data_path).is_err());
         let _ = fs::remove_dir_all(dir);
     }
 

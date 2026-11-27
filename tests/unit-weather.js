@@ -49,6 +49,27 @@
     eq(api.fromText('雾'), 45);
   });
 
+  test('预报日期重写为本地今天+i，城市时区超前不丢今天', () => {
+    // 复现旧问题：接口给的是城市时区日期，跨时区时 daily[0].date 不是本地今天，
+    // 消费端按本地日期匹配会丢「今天」格。归一化后第 i 项必须等于本地今天 + i。
+    const localDate = (offset) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
+    const daily = {
+      daily: [
+        { fxDate: '2099-01-01', iconDay: '100', tempMax: '20', tempMin: '10' },
+        { fxDate: '2099-01-02', iconDay: '305', tempMax: '17', tempMin: '9' },
+      ],
+    };
+    const now = { now: { temp: '15', icon: '101', humidity: '60', windSpeed: '12' } };
+    const w = api.normalizeQWeather(daily, now, { city: '杭州' });
+    eq(w.daily[0].date, localDate(0), 'daily[0] 应为本地今天');
+    eq(w.daily[1].date, localDate(1), 'daily[1] 应为本地明天');
+  });
+
   test('normalizeQWeather 同时取实况与预报', () => {
     const daily = {
       daily: [

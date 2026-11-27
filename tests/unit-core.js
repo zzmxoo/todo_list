@@ -214,8 +214,9 @@
       { text: '普通待办' },
       null,
       { text: 3 },
+      '字符串待办',
     ]);
-    eq(list.length, 3);
+    eq(list.length, 4);
     eq(list[0].source, 'WorkBuddy');
     eq(list[0].provider, 'workbuddy');
     eq(list[0].done, false);
@@ -224,6 +225,7 @@
     eq(list[1].source, null);
     eq(list[1].provider, null);
     eq(list[2].text, '3');
+    eq(list[3].text, '字符串待办');
     ok(typeof list[1].id === 'string' && list[1].id.length > 0, 'generated id');
   });
 

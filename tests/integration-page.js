@@ -252,10 +252,23 @@
   });
 
   await t('[REG-02] 已完成待办从列表隐藏且计数正确', async () => {
-    eq($$('.todo-row.done').length, 0, 'done rows');
+    const text = 'ITEST-完成隐藏';
+    const row = await addTodo(text);
+    row.querySelector('.act-btn.done').click();
+    await sleep(300);
+    const st = await invoke('load_state');
+    ok(
+      ((st && st.todos) || []).some((todo) => todo.text === text && todo.done === true),
+      'disk keeps done item'
+    );
+    ok(!findRow(text), 'done item hidden from list');
+    eq($$('.todo-row.done').length, 0, 'no done rows rendered');
     const countText = $('#count').textContent;
     const count = countText ? parseInt(countText, 10) : 0;
-    eq(count, $$('.todo-row').length, 'count matches rows');
+    eq(count, $$('.todo-row').length, 'count matches open rows');
+    if (!$('#undoToast').hidden) click($('#undoBtn'));
+    await sleep(250);
+    await deleteTodo(text);
     return count + ' items';
   });
 
@@ -1141,6 +1154,7 @@
       }
       await sleep(300);
       ok(infoFires(), '4xx must not disable hover info');
+      ok(window.__TEST_NETWORK_OK() !== false, '4xx classified as network down');
       await sleep(1400);
 
       // 2) 网络错误：天气应停用，但农历/节气/名言等本地信息仍要弹出
@@ -1157,6 +1171,7 @@
       }
       await sleep(300);
       ok(infoFires(), 'network error must keep local hover info');
+      ok(window.__TEST_NETWORK_OK() === false, 'network error not classified as down');
       ok($('#ciWeather').hidden, 'weather row hidden when offline');
 
       // 恢复

@@ -13,6 +13,12 @@
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
+  // 预报第 i 项是「从现在起第 i 天」；接口给的是城市时区日期，跨时区时与本地日历
+  // 对不上（本地今天格丢天气）。统一重写为本地今天 + i，消费端按本地日期匹配。
+  function rebaseDailyDates(days) {
+    return days.map((day, index) => ({ ...day, date: dayKey(index) }));
+  }
+
   function round(value, fallback = 0) {
     const n = Number(value);
     return Number.isFinite(n) ? Math.round(n) : fallback;
@@ -135,7 +141,7 @@
         humidity: round(current.relative_humidity_2m),
         wind: round(current.wind_speed_10m),
       },
-      daily: days,
+      daily: rebaseDailyDates(days),
       ts: Date.now() / 1000,
     };
   }
@@ -163,7 +169,7 @@
         humidity: round(now.humidity),
         wind: round(now.windSpeed),
       },
-      daily: days,
+      daily: rebaseDailyDates(days),
       ts: Date.now() / 1000,
     };
   }
@@ -202,7 +208,7 @@
         humidity: Math.round(humidity),
         wind: Number.isFinite(windKmh) ? Math.round(windKmh) : 0,
       },
-      daily: days,
+      daily: rebaseDailyDates(days),
       ts: Date.now() / 1000,
     };
   }
@@ -246,7 +252,7 @@
       lat: ctx.lat ?? null,
       lon: ctx.lon ?? null,
       current,
-      daily: days,
+      daily: rebaseDailyDates(days),
       ts: Date.now() / 1000,
     };
   }

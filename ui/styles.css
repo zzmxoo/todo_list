@@ -470,16 +470,23 @@ body.minimal-mode .ai-tag {
 .todo-row .actions {
   flex: 0 0 96px;
   margin-left: 0;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
   height: 20px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .todo-row:hover .due-label { display: none; }
 .todo-row:hover .actions,
-.todo-row:focus-within .actions { display: flex; }
+.todo-row:focus-within .actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 
 .act-btn {
   width: 20px;

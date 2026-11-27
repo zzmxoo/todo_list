@@ -72,9 +72,6 @@ function Stop-App {
 $exe = $null
 $backupCreated = $false
 $dataExisted = $null
-$autostartExisted = $false
-$autostartValue = $null
-$autostartSnapshotTaken = $false
 $appWasRunning = $false
 $originalAppPath = $null
 $inboxReal = Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'
@@ -83,7 +80,7 @@ $inboxHold = $null
 $legacyHold = $null
 $inboxExisted = $false
 $legacyExisted = $false
-$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$testRunKey = 'HKCU:\Software\DesktopTodo.Test'
 
 function Eval-Expr([string]$expr) {
   # Windows 命令行上限约 32KB，集成脚本已超过，统一走临时文件传递。
@@ -126,25 +123,17 @@ try {
     $originalAppPath = (Get-Process -Name desktop-todo -ErrorAction SilentlyContinue | Select-Object -First 1).Path
   }
   Stop-App
-  # REG-23 会写入测试 exe 的路径；这里快照用户真实的 Run 值，结束后原样回填。
-  $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-  # 只有读取成功才置快照标志；读失败绝不回填，更不能把「读不到」当「没配置」。
-  try {
-    $autostartProp = Get-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction Stop
-    $autostartExisted = $true
-    $autostartValue = $autostartProp.DesktopTodo
-    $autostartSnapshotTaken = $true
-  } catch {
-    if ($_.CategoryInfo.Category -in @('ObjectNotFound', 'InvalidArgument')) {
-      // Run 键通常存在、值不存在时 PowerShell 5.1 抛 InvalidArgument
-      $autostartExisted = $false
-      $autostartSnapshotTaken = $true
-    } else {
-      throw "无法读取自启注册表，为避免留下测试自启项已中止：$($_.Exception.Message)"
-    }
-  }
+  # 测试构建把自启写到独立 Test 键，真实 Run 键不会被改动，无需快照。
   $dataExisted = Test-Path -LiteralPath $data
   $backupCreated = New-UserDataBackup $data $backup
+  # data.json.bak 现在是恢复源，测试也必须原样保留它。
+  $backupBak = "$backup.bak"
+  if (Test-Path -LiteralPath $backupBak) {
+    throw "发现残留快照备份 $backupBak，请先人工确认上一轮回归是否正常结束"
+  }
+  if (Test-Path -LiteralPath "$data.bak") {
+    Copy-Item -LiteralPath "$data.bak" -Destination $backupBak -Force
+  }
   # 测试版会 drain 真实收件箱并删除源文件；先整个挪走，结束后原样放回。
   $inboxExisted = Test-Path -LiteralPath $inboxReal
   if ($inboxExisted) {
@@ -270,10 +259,13 @@ fetch('quotes.json')
   }
   $executed = @($result.results | Where-Object { -not $_.skipped }).Count
   $skippedCases = [int]$result.skipped
-  $executedFloor = [Math]::Max(0, $MIN_INTEGRATION_EXECUTED - $skippedCases)
-  if ($executed -lt $executedFloor) {
+  if ($executed -lt $MIN_INTEGRATION_EXECUTED) {
     $failed += 1
-    "FAIL  INTEGRATION only $executed cases actually executed, expected at least $executedFloor（skip=$skippedCases）"
+    "FAIL  INTEGRATION only $executed cases actually executed, expected at least $MIN_INTEGRATION_EXECUTED"
+  }
+  if ($skippedCases -gt 3) {
+    $failed += 1
+    "FAIL  INTEGRATION skipped $skippedCases cases, expected at most 3"
   }
 
   # REG-46 端到端：损坏的 data.json 不能被静默写成空壳。
@@ -368,39 +360,45 @@ finally {
       "FAIL  恢复用户数据失败：$($_.Exception.Message)"
       "      备份保留在 $backup，请人工确认后再运行回归"
     }
+    if (Test-Path -LiteralPath $backupBak) {
+      Copy-Item -LiteralPath $backupBak -Destination "$data.bak" -Force
+      Remove-Item -LiteralPath $backupBak -Force
+    } else {
+      Remove-Item -LiteralPath "$data.bak" -Force -ErrorAction SilentlyContinue
+    }
   } elseif ($dataExisted -eq $false -and (Test-Path -LiteralPath $data)) {
     # 首次安装本来没有 data.json：测试新建的那份含测试设置，不能留给用户。
     Remove-Item -LiteralPath $data -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$data.bak" -Force -ErrorAction SilentlyContinue
   }
-  # REG-23 会开启自启（写入测试 exe 路径）；只有确实快照过才回填。
-  if ($autostartSnapshotTaken) {
-    try {
-      if ($autostartExisted) {
-        Set-ItemProperty -Path $runKey -Name 'DesktopTodo' -Value $autostartValue
-      } else {
-        Remove-ItemProperty -Path $runKey -Name 'DesktopTodo' -ErrorAction Stop
-      }
-    } catch {
-      $failed += 1
-      "FAIL  恢复开机启动注册表失败：$($_.Exception.Message)"
-    }
-  }
+  # 测试构建写的是独立 Test 键，清理它即可；真实 Run 键从未被改动。
+  Remove-Item -LiteralPath $testRunKey -Recurse -Force -ErrorAction SilentlyContinue
   # 清掉测试期间新建的收件箱，再把用户原收件箱放回。
   # 只有「确实搬走成功」才允许删除/恢复；搬走失败时用户目录原样保留。
   if ($inboxExisted) {
     if ($inboxHold) {
-      Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
-      New-Item -ItemType Directory -Force -Path (Split-Path $inboxReal -Parent) | Out-Null
-      Move-Item -LiteralPath $inboxHold -Destination $inboxReal -Force
+      try {
+        Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path (Split-Path $inboxReal -Parent) | Out-Null
+        Move-Item -LiteralPath $inboxHold -Destination $inboxReal -Force -ErrorAction Stop
+      } catch {
+        $failed += 1
+        "FAIL  收件箱恢复失败：用户原收件箱暂存在 $inboxHold，请手工移回 $inboxReal"
+      }
     }
   } else {
     Remove-Item -LiteralPath $inboxReal -Recurse -Force -ErrorAction SilentlyContinue
   }
   if ($legacyExisted) {
     if ($legacyHold) {
-      Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue
-      New-Item -ItemType Directory -Force -Path (Split-Path $inboxLegacy -Parent) | Out-Null
-      Move-Item -LiteralPath $legacyHold -Destination $inboxLegacy -Force
+      try {
+        Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path (Split-Path $inboxLegacy -Parent) | Out-Null
+        Move-Item -LiteralPath $legacyHold -Destination $inboxLegacy -Force -ErrorAction Stop
+      } catch {
+        $failed += 1
+        "FAIL  旧收件箱恢复失败：暂存在 $legacyHold，请手工移回 $inboxLegacy"
+      }
     }
   } else {
     Remove-Item -LiteralPath $inboxLegacy -Recurse -Force -ErrorAction SilentlyContinue

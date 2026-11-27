@@ -1,4 +1,4 @@
-﻿# 回归测试集
+# 回归测试集
 
 本文件是回归用例的**清单**：每个已修复的问题、每条必须长期保持的行为，都要能在这里找到对应的自动化用例。
 `tests/integration-page.js` 中的用例名直接带 `[REG-xx]` 编号，方便从失败项反查历史问题。
@@ -110,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-84 | MSIX 拒绝 major≥1 的映射；测试 exe 缓存包含脚本自身改动 | 本次修复 | `build-msix.ps1` / `build-test-exe.ps1` |
 | REG-85 | tray 初始化失败提示、任务栏与托盘换序回滚、capabilities 允许 destroy、自定义天气允许有限跳转、`1:00` 时长、自启路径比对、退出 flush 不超时、悬停 grace 复位、文本强制转字符串、预报首行兜底 | 本次修复 | Rust 时长/地址用例；`unit-core`；人工手测 |
 | REG-86 | 天气预报按「本地今天 + 第 i 天」映射日历日期，城市时区与系统不同也不会丢天气图标 | 本次修复 | 人工切换异地城市；代码审查 `localWeatherDayKey` |
-| REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 52 条 |
+| REG-87 | Rust 单测覆盖：收件箱 id 校验与 200 条上限、MCP 50 条上限与去重、时长/日期/闰日边界、`--exe` 参数 | 本次修复 | Rust 单测 53 条 |
 | REG-88 | 自启回读整路径编码损坏时退化为文件名匹配，中文安装路径不会恒显示「已关闭」 | 本次修复 | Rust `autostart_output_falls_back_to_ascii_file_name` |
 | REG-89 | 损坏备份窗口放宽到 30 天，mtime 刷新失败会打印告警，不会刚隔离就“过期” | 本次修复 | Rust `stale_corrupt_backup...`（31 天）+ 代码审查 |
 | REG-90 | 边缘收起期间被跳过的布局，弹出后补跑 `scheduleLayout()` | 本次修复 | 人工：贴边收起时 AI 写入待办 |
@@ -134,6 +134,9 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-108 | 多屏按物理像素选屏再换算逻辑边界；天气按接口日期映射；weatherBusy 脏标记；删除可撤销；只读禁用天气胶囊；节气按本地日期；自定义天气同源校验；测试自启写独立注册表键 | 本次修复 | REG-45/68 + 人工多屏/撤销验证 |
 | REG-109 | 迁移失败要上报、成功后写标记且损坏备份存在时不复活旧副本；收件箱搬走失败时不得删除用户目录；AI 合并期间不写盘；退出兜底 8s；save_state 校验 todos/settings；只读瞬时读失败重试 | 本次修复 | Rust 单测 + `regression.ps1` / `integration.ps1` |
 | REG-110 | 门禁与文档：实际执行数随 skip 调整；`other` 类名；4xx 测试调用实现；测试 exe 缓存含提交号；changelog 数据路径；REG-04 主动重绘；REG-27 查询失败不 skip | 本次修复 | 对应用例与 workflow |
+| REG-111 | `data.json` 缺失但 `.bak` 可解析时进入只读并提示恢复；收件箱搬走/回放失败不得误删或静默滞留；执行数下限不再恒真；测试构建只清理 Test 注册表键 | 本次修复 | Rust `.bak` 用例；脚本与 REG-02/38 |
+| REG-112 | 显示器查询失败不再升级为数据只读；退出保存失败三条路径都二次确认；`normalizeTodos` 字符串条目、`parseDue` 非法日期、背景清理跳过当前图 | 本次修复 | REG-38 + 单元用例 |
+| REG-113 | 退出确认框弹出前先停掉 Rust 8s 兜底，确认框未决时不再被销毁/退出；定位链路（IP 成功分支与 `useGps`）都带 token 守卫，手动输入城市后迟到的定位结果不覆盖坐标；天气预报日期在归一化层重写为本地今天+i，跨时区不丢「今天」格 | 本次修复 | `unit-weather` 跨时区用例；人工确认退出与定位时序 |
 
 ## 单元 / 纯函数回归（`tests/unit-*.js` + Rust `mod tests`）
 

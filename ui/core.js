@@ -148,19 +148,23 @@
   function normalizeTodos(input) {
     return (Array.isArray(input) ? input : [])
       .filter((todo) => todo)
-      .map((todo) => ({
-        ...todo,
-        id: todo.id == null || todo.id === "" ? newTodoId() : String(todo.id),
-        text: todo.text == null ? "(无内容)" : String(todo.text),
-        done: !!todo.done,
-        done_at: todo.done_at || null,
-        pinned: !!todo.pinned,
-        due: todo.due || null,
-        start: todo.start || null,
-        created: todo.created || new Date().toISOString(),
-        source: todo.source || null,
-        provider: todo.provider || null,
-      }));
+      .map((todo) => {
+        // 兼容外部工具写入的字符串数组：直接展开字符串会生成 {"0":"p",...} 垃圾键。
+        const base = typeof todo === "string" ? { text: todo } : todo;
+        return {
+          ...base,
+          id: base.id == null || base.id === "" ? newTodoId() : String(base.id),
+          text: base.text == null ? "(无内容)" : String(base.text),
+          done: !!base.done,
+          done_at: base.done_at || null,
+          pinned: !!base.pinned,
+          due: base.due || null,
+          start: base.start || null,
+          created: base.created || new Date().toISOString(),
+          source: base.source || null,
+          provider: base.provider || null,
+        };
+      });
   }
 
   // todos 字段存在但不是数组时不能静默当空清单，否则下一次保存会覆盖原数据。
