@@ -1,6 +1,6 @@
 [package]
 name = "desktop-todo"
-version = "0.0.10"
+version = "0.0.11"
 description = "Tiny·待办事项"
 authors = ["Todo Widget"]
 license = "MIT"
