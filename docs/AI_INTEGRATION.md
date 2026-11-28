@@ -1,6 +1,6 @@
 # AI 接入
 
-外部 AI 工具（DeepSeek Harness、WorkBuddy、豆包 CLI 等）通过 **MCP** 或 **命令行** 把待办写入桌面待办小组件。链路是本地文件收件箱，不监听端口、不联网、不需要账号。
+外部 AI 工具（DeepSeek Harness、WorkBuddy、豆包 CLI 等）通过 **MCP** 或 **命令行** 把待办写入 Tiny·待办事项 小组件。链路是本地文件收件箱，不监听端口、不联网、不需要账号。
 
 ## 工作方式
 
@@ -9,7 +9,7 @@ AI 客户端
   ├─ MCP stdio:  desktop-todo.exe --mcp      ─┐
   └─ CLI:        desktop-todo.exe --add ...   ─┤
                                              ▼
-                 %USERPROFILE%\.desktoptodo\ai-inbox\<id>.json
+                 %LOCALAPPDATA%\desktoptodo\ai-inbox\<id>.json
                                              ▼  桌面端每秒 drain
                       合并进 data.json（按 id 去重）→ 列表出现待办
 ```
@@ -93,7 +93,7 @@ dsh 通过 `@deepseek-ai/dsh-mcp-client` 插件接 MCP，一个插件实例对�
 
 重启 dsh 后，工具应出现在 `mcp__desktop-todo__add_todo` 之类的命名空间下。可以让 dsh 把任务直接记为待办，例如：
 
-> 把「整理周报」加入桌面待办，截止周五 18:00。
+> 把「整理周报」加入 Tiny·待办事项，截止周五 18:00。
 
 ## WorkBuddy
 

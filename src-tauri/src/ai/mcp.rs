@@ -24,7 +24,7 @@ fn tools() -> Value {
         {
             "name": "add_todo",
             "title": "添加到待办事项",
-            "description": "向桌面待办小组件（待办事项）添加一条待办或会议提醒。普通截止用 due；会议/日程用 start + duration_minutes（或 time + duration），会自动算结束时间。用户说“添加到待办事项 / 提醒我 / 记一下 / 安排会议”时使用。",
+            "description": "向 Tiny·待办事项 小组件 添加一条待办或会议提醒。普通截止用 due；会议/日程用 start + duration_minutes（或 time + duration），会自动算结束时间。用户说“添加到待办事项 / 提醒我 / 记一下 / 安排会议”时使用。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -44,7 +44,7 @@ fn tools() -> Value {
         {
             "name": "add_todos",
             "title": "批量添加到待办事项",
-            "description": "批量添加待办/提醒/会议到桌面待办事项。todos 内每一项支持 text/due/start/duration_minutes/pinned，外层可统一指定 provider/source。",
+            "description": "批量添加待办/提醒/会议到 Tiny·待办事项。todos 内每一项支持 text/due/start/duration_minutes/pinned，外层可统一指定 provider/source。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -71,7 +71,7 @@ fn tools() -> Value {
         {
             "name": "list_todos",
             "title": "查看待办事项",
-            "description": "列出桌面待办事项中未完成的待办，便于 AI 查看已有事项、避免重复添加。",
+            "description": "列出 Tiny·待办事项 中未完成的待办，便于 AI 查看已有事项、避免重复添加。",
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])
@@ -246,7 +246,7 @@ pub fn handle(request: &Value, dir: &Path) -> Option<Value> {
                 "title": "待办事项",
                 "version": env!("CARGO_PKG_VERSION")
             },
-            "instructions": "这是用户的桌面待办事项（Todo）服务。当用户说“添加到待办事项 / 提醒我 / 记一下 / 安排会议 / 加个日程”时，用 add_todo 或 add_todos 写入；查看已有事项用 list_todos。会议用 start + duration_minutes，不要把时间只写进 text。"
+            "instructions": "这是用户的 Tiny·待办事项（Todo）服务。当用户说“添加到待办事项 / 提醒我 / 记一下 / 安排会议 / 加个日程”时，用 add_todo 或 add_todos 写入；查看已有事项用 list_todos。会议用 start + duration_minutes，不要把时间只写进 text。"
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),

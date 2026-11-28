@@ -1,6 +1,6 @@
-﻿# 桌面待办小组件
+# Tiny·待办事项
 
-Windows 桌面待办小工具，Tauri 2 + WebView2 实现。深色玻璃拟态界面，无边框、置顶、可拖动。
+Windows 待办事项小工具（Tiny·待办事项），Tauri 2 + WebView2 实现。深色玻璃拟态界面，无边框、置顶、可拖动。
 
 ## 直接运行
 
@@ -8,7 +8,7 @@ Windows 桌面待办小工具，Tauri 2 + WebView2 实现。深色玻璃拟态�
 src-tauri\target\release\desktop-todo.exe
 ```
 
-首次运行会在 `%APPDATA%\com.desktoptodo.widget\` 下创建 `data.json` 保存待办、设置和天气缓存；
+首次运行会在 `%LOCALAPPDATA%\desktoptodo\` 下创建 `data.json` 保存待办、设置和天气缓存；
 选择的背景图也会复制到该目录，移动原图不影响使用。
 
 ## 开发文档
@@ -89,11 +89,11 @@ powershell -ExecutionPolicy Bypass -File tests\run.ps1
 
 ## 数据与隐私
 
-- 待办、设置和 AI 收件箱都保存在本机 `%USERPROFILE%\.desktoptodo\`；旧版本 `%APPDATA%\com.desktoptodo.widget\` 会在首次启动时自动迁移。
+- 待办、设置和 AI 收件箱都保存在本机 `%LOCALAPPDATA%\desktoptodo\`；旧版本 `%USERPROFILE%\.desktoptodo\` 与 `%APPDATA%\com.desktoptodo.widget\` 会在首次启动时自动迁移。
 - 天气默认来自 Open-Meteo 免费接口（无需密钥）：按设置中的城市或当前位置查询经纬度后获取实时与 7 日预报。自定义天气链接（含其中的 key / token）只保存在本机 `data.json`，请求由本程序直接发出。
 - 法定节假日数据来自 [NateScarlet/holiday-cn](https://github.com/NateScarlet/holiday-cn)（经 jsDelivr CDN 获取），仅保存日期与节日名。
 - 名言库随程序内置（`ui/quotes.json`），其中大部分整理自 [lowb](https://www.npmjs.com/package/lowb)（MIT），另含整理的经典名句；运行时不联网获取名言。
-- 无遥测、无账号、无云端同步。
+- 无遥测、无账号、无云端同步。MIT 开源协议，隐私政策见 [docs/PRIVACY.md](docs/PRIVACY.md)。
 
 ## 退出
 

@@ -949,14 +949,14 @@
   });
 
   await t('[REG-43] 定位有多路备用服务（IP 定位 + 逆地理编码）', async () => {
-    // 需求：单一服务总有挂的时候，要能换一个再试。
+    // 需求：单一服务总有挂的时候，要能换一个再试；商店版要求全部 HTTPS。
     const W = window.WeatherAPI;
     const ip = W.IP_LOCATE_SOURCES;
     ok(Array.isArray(ip), 'ip sources');
     ok(ip.length >= 2, 'at least 2 ip sources, got ' + ip.length);
     for (const s of ip) {
       ok(s.name, 'ip source name');
-      ok(/^https?:\/\//.test(s.url), s.name + ' has url');
+      ok(/^https:\/\//.test(s.url), s.name + ' must be https');
       ok(typeof s.city === 'function', s.name + ' city extractor');
       ok(typeof s.coords === 'function', s.name + ' coords extractor');
     }
@@ -970,6 +970,7 @@
       ok(typeof s.url === 'function', s.name + ' reverse url builder');
       const u = s.url(30.28, 120.22);
       ok(u.includes('30.28') && u.includes('120.22'), s.name + ' embeds coords');
+      ok(/^https:\/\//.test(u), s.name + ' must be https');
       ok(typeof s.city === 'function', s.name + ' reverse city extractor');
     }
 
@@ -977,10 +978,10 @@
     const bdc = ip.find((s) => s.name === 'bigdatacloud');
     ok(bdc, 'bigdatacloud source');
     eq(bdc.city({ city: '杭州市', principalSubdivision: '浙江省' }), '杭州市', 'bdc city');
-    const ipapi = ip.find((s) => s.name === 'ip-api');
-    ok(ipapi, 'ip-api source');
-    eq(ipapi.city({ status: 'success', city: '杭州', regionName: '浙江' }), '杭州', 'ip-api city');
-    eq(ipapi.city({ status: 'fail' }), '', 'ip-api failure -> empty');
+    const ipwho = ip.find((s) => s.name === 'ipwho.is');
+    ok(ipwho, 'ipwho.is source');
+    eq(ipwho.city({ success: true, city: '杭州', region: '浙江' }), '杭州', 'ipwho city');
+    eq(ipwho.city({ success: false }), '', 'ipwho failure -> empty');
     const nomi = rev.find((s) => s.name === 'nominatim');
     ok(nomi, 'nominatim source');
     eq(
@@ -1007,7 +1008,7 @@
     // 模拟所有定位渠道失败：拦截 fetch_json
     const realInvoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
     window.__TEST_INVOKE = function (cmd, args) {
-      if (cmd === 'fetch_json' && /bigdatacloud|ipwho|ip-api/.test((args && args.url) || '')) {
+      if (cmd === 'fetch_json' && /bigdatacloud|ipwho/.test((args && args.url) || '')) {
         return Promise.reject(new Error('NET_ERR:连接失败'));
       }
       return realInvoke(cmd, args);

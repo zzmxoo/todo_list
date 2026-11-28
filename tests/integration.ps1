@@ -9,7 +9,7 @@ if (-not $owned) { throw '另一个回归进程正在运行（integration.ps1 / 
 
 $root = Split-Path $PSScriptRoot -Parent
 $cdp = Join-Path $root '_dev_cdp.ps1'
-$data = Join-Path $env:USERPROFILE '.desktoptodo\data.json'
+$data = Join-Path $env:LOCALAPPDATA 'desktoptodo\data.json'
 $backup = "$data.itest"
 . (Join-Path $PSScriptRoot 'regress-lib.ps1')
 
@@ -40,7 +40,7 @@ $restoreFailed = $false
 $dataExisted = $null
 $appWasRunning = $false
 $originalAppPath = $null
-$inboxReal = Join-Path $env:USERPROFILE '.desktoptodo\ai-inbox'
+$inboxReal = Join-Path $env:LOCALAPPDATA 'desktoptodo\ai-inbox'
 $inboxLegacy = Join-Path $env:APPDATA 'com.desktoptodo.widget\ai-inbox'
 $inboxHold = $null
 $legacyHold = $null

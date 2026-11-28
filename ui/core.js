@@ -1,4 +1,4 @@
-/* 桌面待办 —— 可复用的纯函数（浏览器挂到 window.TodoCore，Node 下可 require） */
+/* Tiny·待办事项 —— 可复用的纯函数（浏览器挂到 window.TodoCore，Node 下可 require） */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;

@@ -1,4 +1,4 @@
-/* 桌面待办 —— Tauri + WebView2 前端 */
+/* Tiny·待办事项 —— Tauri + WebView2 前端 */
 (() => {
   "use strict";
 
@@ -495,6 +495,9 @@
     els.autostartSwitch = document.getElementById("autostartSwitch");
     els.taskbarSwitch = document.getElementById("taskbarSwitch");
     els.aboutVersion = document.getElementById("aboutVersion");
+    els.aboutPrivacy = document.getElementById("aboutPrivacy");
+    els.aboutRepo = document.getElementById("aboutRepo");
+    els.aboutLicense = document.getElementById("aboutLicense");
     els.aiMcpJson = document.getElementById("aiMcpJson");
     els.aiDshCommand = document.getElementById("aiDshCommand");
     els.aiDshYaml = document.getElementById("aiDshYaml");
@@ -3795,6 +3798,26 @@
       refreshWeather();
     });
     els.locateBtn.addEventListener("click", () => locate());
+
+    // 关于页：隐私政策 / 仓库 / 开源协议，统一走 Rust open_url 用默认浏览器打开。
+    // 隐私政策由 GitHub Pages 托管（docs/PRIVACY.md → /todo_list/PRIVACY.html）。
+    const openExternal = (url) => {
+      invoke("open_url", { url }).catch((err) => console.warn("open_url failed", err));
+    };
+    const ABOUT_URLS = {
+      privacy: "https://zzmxoo.github.io/todo_list/PRIVACY.html",
+      repo: "https://github.com/zzmxoo/todo_list",
+      license: "https://github.com/zzmxoo/todo_list/blob/master/LICENSE",
+    };
+    if (els.aboutPrivacy) {
+      els.aboutPrivacy.addEventListener("click", () => openExternal(ABOUT_URLS.privacy));
+    }
+    if (els.aboutRepo) {
+      els.aboutRepo.addEventListener("click", () => openExternal(ABOUT_URLS.repo));
+    }
+    if (els.aboutLicense) {
+      els.aboutLicense.addEventListener("click", () => openExternal(ABOUT_URLS.license));
+    }
 
     els.quitBtn.addEventListener("click", async () => {
       let canExit = true;

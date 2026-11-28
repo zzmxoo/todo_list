@@ -40,64 +40,164 @@ pub fn data_dir_override() -> Option<PathBuf> {
     None
 }
 
-/// 不依赖 Tauri AppHandle 的数据目录，供 `--mcp` / `--add` 进程使用。
-pub fn data_dir() -> Result<PathBuf, String> {
-    if let Some(dir) = data_dir_override() {
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        return Ok(dir);
+/// MSIX 包身份检测，供 data_dir 与 main.rs 的开机自启逻辑共用。
+#[cfg(windows)]
+pub fn has_package_identity() -> bool {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentPackageFullName(len: *mut u32, name: *mut u16) -> i32;
     }
-    // 商店版（MSIX）会虚拟化 AppData，GUI 与外部 AI 进程会看到两份 data.json。
-    // 统一放到用户目录下，收件箱与主数据同根。
-    let home = std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
-        .ok_or_else(|| "USERPROFILE / APPDATA 未设置".to_string())?;
-    let dir = home.join(".desktoptodo");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir)
+    // 传空缓冲区时打包进程返回 ERROR_INSUFFICIENT_BUFFER(122)，
+    // 未打包进程返回 APPMODEL_ERROR_NO_PACKAGE(15700)；其它错误不能当成「已打包」。
+    const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
+    let mut len: u32 = 0;
+    let rc = unsafe { GetCurrentPackageFullName(&mut len, std::ptr::null_mut()) };
+    rc == ERROR_INSUFFICIENT_BUFFER || rc == 0
 }
 
-pub fn inbox_dir(dir: &Path) -> Result<PathBuf, String> {
-    // data_dir 已经是跨进程共享的 ~/.desktoptodo（测试则指向临时目录）。
-    let path = dir.join(INBOX_DIR);
-    fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-    // 旧版本把收件箱放在 AppData；升级时搬过来。测试目录不迁移用户真实收件箱。
-    let legacy = if cfg!(test) || data_dir_override().is_some() {
-        None
-    } else {
-        std::env::var_os("APPDATA")
-            .map(|base| PathBuf::from(base).join(APP_IDENTIFIER).join(INBOX_DIR))
-    };
-    if let Some(legacy) = legacy.filter(|legacy| legacy != &path) {
-        if legacy.exists() {
-            if let Ok(entries) = fs::read_dir(&legacy) {
-                for entry in entries.flatten() {
-                    let src = entry.path();
-                    if src.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                        continue;
-                    }
-                    let dst = path.join(entry.file_name());
-                    if !dst.exists() {
-                        if fs::rename(&src, &dst).is_err() {
-                            // 跨卷/权限场景 rename 会失败，copy 成功后再删源。
-                            match fs::copy(&src, &dst) {
-                                Ok(_) => {
-                                    let _ = fs::remove_file(&src);
-                                }
-                                Err(err) => {
-                                    eprintln!(
-                                        "warning: 迁移旧收件箱失败 {} -> {}: {err}",
-                                        src.display(),
-                                        dst.display()
-                                    );
-                                }
-                            }
-                        }
+#[cfg(not(windows))]
+pub fn has_package_identity() -> bool {
+    false
+}
+
+/// 真实的本机 LocalAppData 目录。
+///
+/// 包身份下 %LOCALAPPDATA% 会被 MSIX 重定向到包私有目录，GUI 与外部
+/// AI 进程（MCP/CLI）会看到两份数据。USERPROFILE 不参与重定向，因此
+/// 在包身份下用 USERPROFILE\AppData\Local 拿到真实目录，保证两边一致；
+/// 普通安装版优先尊重 LOCALAPPDATA 环境变量。
+fn local_app_data() -> Result<PathBuf, String> {
+    if has_package_identity() {
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            return Ok(PathBuf::from(home).join("AppData").join("Local"));
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        return Ok(PathBuf::from(local));
+    }
+    std::env::var_os("USERPROFILE")
+        .map(|home| PathBuf::from(home).join("AppData").join("Local"))
+        .ok_or_else(|| "LOCALAPPDATA / USERPROFILE 未设置".to_string())
+}
+
+/// 把旧数据目录里的内容搬到新目录。原则：只迁移、不删除用户数据，
+/// 目标已有数据或损坏备份时绝不拿旧副本复活陈旧数据。
+fn migrate_legacy_dir(dir: &Path, legacy: &Path) {
+    if legacy == dir || !legacy.exists() {
+        return;
+    }
+    let name = legacy
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("legacy");
+    let marker = dir.join(format!(".migrated-from-{name}"));
+    if marker.exists() {
+        return;
+    }
+    let has_corrupt = fs::read_dir(dir)
+        .map(|entries| {
+            entries.flatten().any(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|file| file.starts_with("data.json.corrupt-"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    if dir.join("data.json").exists() || has_corrupt {
+        let _ = fs::write(&marker, "present");
+        return;
+    }
+
+    // 主数据：复制成功后再把旧文件改名，避免下次误迁移。
+    let old_data = legacy.join("data.json");
+    if old_data.exists() {
+        if fs::copy(&old_data, dir.join("data.json")).is_err() {
+            return; // 迁移失败不碰旧文件，下次再试
+        }
+        let _ = fs::rename(&old_data, old_data.with_extension("json.migrated"));
+    }
+    let _ = fs::write(&marker, "migrated");
+
+    // AI 收件箱：逐个搬，目标已存在则保留目标。
+    let legacy_inbox = legacy.join(INBOX_DIR);
+    if legacy_inbox.exists() {
+        let inbox = dir.join(INBOX_DIR);
+        let _ = fs::create_dir_all(&inbox);
+        if let Ok(entries) = fs::read_dir(&legacy_inbox) {
+            for entry in entries.flatten() {
+                let src = entry.path();
+                if src.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    continue;
+                }
+                let dst = inbox.join(entry.file_name());
+                if dst.exists() {
+                    continue;
+                }
+                if fs::rename(&src, &dst).is_err() {
+                    if fs::copy(&src, &dst).is_ok() {
+                        let _ = fs::remove_file(&src);
                     }
                 }
             }
         }
     }
+
+    // 背景图片副本。
+    if let Ok(entries) = fs::read_dir(legacy) {
+        for entry in entries.flatten() {
+            let src = entry.path();
+            let is_bg = src
+                .file_name()
+                .and_then(|file| file.to_str())
+                .map(|file| file.starts_with("bg-"))
+                .unwrap_or(false);
+            if !is_bg {
+                continue;
+            }
+            let dst = dir.join(entry.file_name());
+            if dst.exists() {
+                continue;
+            }
+            if fs::rename(&src, &dst).is_err() {
+                if fs::copy(&src, &dst).is_ok() {
+                    let _ = fs::remove_file(&src);
+                }
+            }
+        }
+    }
+}
+
+/// 不依赖 Tauri AppHandle 的数据目录，供 GUI / `--mcp` / `--add` 进程共用。
+///
+/// 主目录为 `%LOCALAPPDATA%\desktoptodo`。商店版（MSIX）在包身份下会
+/// 把 %LOCALAPPDATA% 重定向到包私有目录，因此包身份下改用真实路径
+/// `USERPROFILE\AppData\Local`，让 GUI 与外部 AI 进程始终读写同一份数据。
+pub fn data_dir() -> Result<PathBuf, String> {
+    if let Some(dir) = data_dir_override() {
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        return Ok(dir);
+    }
+    let dir = local_app_data()?.join("desktoptodo");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    // 旧位置迁移：先迁较新的 ~/.desktoptodo，再迁旧版 %APPDATA%。
+    // 测试目录（data_dir_override）不迁移用户真实数据。
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        migrate_legacy_dir(&dir, &PathBuf::from(home).join(".desktoptodo"));
+    }
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        migrate_legacy_dir(&dir, &PathBuf::from(appdata).join(APP_IDENTIFIER));
+    }
+    Ok(dir)
+}
+
+pub fn inbox_dir(dir: &Path) -> Result<PathBuf, String> {
+    // data_dir 已经是跨进程共享的 %LOCALAPPDATA%\desktoptodo（测试则指向临时目录）；
+    // 旧位置的收件箱由 data_dir() 统一迁移。
+    let path = dir.join(INBOX_DIR);
+    fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     Ok(path)
 }
 

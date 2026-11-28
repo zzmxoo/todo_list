@@ -105,7 +105,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-79 | `finally` 里的 `Stop-App` 失败不能跳过注册表恢复；进程仍存活时不恢复数据并保留 `.keep` 副本；只有测试前在运行才重启发布版 | 本次修复 | `regression.ps1` / `integration.ps1` 的 `$stillRunning` / `$appWasRunning` |
 | REG-80 | `wmoInfo` 返回对象后六个调用点取 `.kind`/`.text`，天气图标与文案不再恒为多云/undefined | 本次修复 | 人工查看天气卡；代码审查 |
 | REG-81 | 多屏边界换算为逻辑像素；单屏优先用 `screen.avail*` 工作区 | 本次修复 | REG-24 + 125% 缩放手测 |
-| REG-82 | 生产收件箱改到 `%USERPROFILE%\.desktoptodo\ai-inbox`，避免 MSIX AppData 虚拟化劈成两个目录；旧收件箱自动迁移 | 本次修复 | REG-45；商店版真机 `--add` 验证 |
+| REG-82 | 生产收件箱改到 `%LOCALAPPDATA%\desktoptodo\ai-inbox`，避免 MSIX AppData 虚拟化劈成两个目录；旧收件箱自动迁移 | 本次修复 | REG-45；商店版真机 `--add` 验证 |
 | REG-83 | `cargo test` 非零退出码必须失败；注册表读失败不回填；QUOTES/REG-46 也计入内置用例下限 | 本次修复 | 脚本日志 + 代码审查 |
 | REG-84 | MSIX 拒绝 major≥1 的映射；测试 exe 缓存包含脚本自身改动 | 本次修复 | `build-msix.ps1` / `build-test-exe.ps1` |
 | REG-85 | tray 初始化失败提示、任务栏与托盘换序回滚、capabilities 允许 destroy、自定义天气允许有限跳转、`1:00` 时长、自启路径比对、退出 flush 不超时、悬停 grace 复位、文本强制转字符串、预报首行兜底 | 本次修复 | Rust 时长/地址用例；`unit-core`；人工手测 |
@@ -128,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 | REG-102 | 非数组 `todos` 不许被重置；缺 text 的待办不静默丢；未知顶层键/字段保存时保留 | 本次修复 | Rust `drain_rejects_non_array...`；`unit-core` |
 | REG-103 | 回归前把真实收件箱（含旧 AppData）移走，结束后原样放回 | 本次修复 | `regression.ps1` / `integration.ps1` |
 | REG-104 | `.keep` 残留也会阻止备份；窗口位置只由 savePosition 回写；退出等待有 5 秒上限 | 本次修复 | `test-regress-lib` / 人工启动位置 |
-| REG-105 | 数据根统一 `~/.desktoptodo` 并迁移；自定义天气 IPv6 归一；`normalize_due` 校验日历合法性；`add_minutes` 支持时区；数字 duration 限 1..1440 | 本次修复 | Rust 单测 + MSIX 真机验证 |
+| REG-105 | 数据根统一 `%LOCALAPPDATA%\desktoptodo` 并迁移；自定义天气 IPv6 归一；`normalize_due` 校验日历合法性；`add_minutes` 支持时区；数字 duration 限 1..1440 | 本次修复 | Rust 单测 + MSIX 真机验证 |
 | REG-106 | MSIX skip 不再导致 CI 硬失败；集成门禁要求实际执行数；断网 REG-11/38 转 skip；REG-36 断言注入发生；REG-44 还原进 finally | 本次修复 | workflow + 对应用例 |
 | REG-107 | 互斥量失败有提示并退 Local；保存前留 `data.json.bak`；收件箱 tmp 带 PID；坏样本带时间戳不覆盖 | 本次修复 | Rust 单测 + 代码审查 |
 | REG-108 | 多屏按物理像素选屏再换算逻辑边界；天气按接口日期映射；weatherBusy 脏标记；删除可撤销；只读禁用天气胶囊；节气按本地日期；自定义天气同源校验；测试自启写独立注册表键 | 本次修复 | REG-45/68 + 人工多屏/撤销验证 |

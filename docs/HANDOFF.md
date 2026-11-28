@@ -1,14 +1,14 @@
-﻿# 桌面待办 · 项目交接与上下文摘要
+# Tiny·待办事项 · 项目交接与上下文摘要
 
 > 更新：2026-11-27 · 最新 tag：`0.0.10`
 > 用途：后续会话 / 协作者先读本文件，快速恢复产品背景、设计规范、技术约束和测试约定。
 
 ## 1. 项目定位
 
-Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴边隐藏；主界面是待办列表，日历模式为「左待办 + 右月历」单页布局，天气和每日一句作为辅助信息。
+Windows 待办事项小组件（Tiny·待办事项）。无边框、深色玻璃、窗口置顶、可贴边隐藏；主界面是待办列表，日历模式为「左待办 + 右月历」单页布局，天气和每日一句作为辅助信息。
 
 - 技术栈：Tauri v2 + WebView2 + Rust；前端为原生 HTML/CSS/JS，**无 Node 构建、无框架、无打包器**。
-- 数据只存本机：`%USERPROFILE%\.desktoptodo\data.json`（旧版 `%APPDATA%` 目录首次启动自动迁移）。
+- 数据只存本机：`%LOCALAPPDATA%\desktoptodo\data.json`（旧版 `%USERPROFILE%\.desktoptodo\` 与 `%APPDATA%` 目录首次启动自动迁移）。
 - 发布版：`cargo build --release` 后运行 `src-tauri\target\release\desktop-todo.exe`，前端资源编译进 exe。
 - 仓库当前没有配置远程，提交和 tag 都在本地。
 
@@ -22,7 +22,7 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 
 | 时间 | 需求 / 问题 | 落地结果 |
 | --- | --- | --- |
-| 11-17 | 桌面待办首个版本 | Tauri 版基础窗口、待办增删改查、日历、天气、设置 |
+| 11-17 | Tiny·待办事项 首个版本 | Tauri 版基础窗口、待办增删改查、日历、天气、设置 |
 | 11-17 | 名言警句国外比例不超过 30% | 1313 条（365×4）内置名言，中文约 70%，国外 ≤30%，运行时不联网获取 |
 | 11-17 | 法定节假日未标明假期 | 日期格显示假期名与底色 |
 | 11-17 | 多天假期每天都要写明假期名 | 每个假期日独立标签，不是只在首日标一次 |
@@ -175,7 +175,7 @@ Windows 桌面待办小组件。无边框、深色玻璃、窗口置顶、可贴
 - CLI：`desktop-todo.exe --add "..." [--due] [--start] [--duration] [--provider] [--source] [--pinned]`。
 - 注册：`desktop-todo.exe --install-mcp workbuddy|dsh|generic [--exe <path>]`；WorkBuddy 写入本地插件市场（仍需用户点一次安装），DSH 生成配置片段，generic 输出 JSON。
 - 会议支持：`start` + `duration_minutes`（或 `time`/`due` + `duration`），服务端自动算结束时间；列表显示 `10:30–11:30`，日历按区间绘制。
-- 写入走 `%USERPROFILE%\.desktoptodo\ai-inbox\<id>.json` 收件箱；桌面端每秒 drain，按 id 去重后合并进 `data.json`。
+- 写入走 `%LOCALAPPDATA%\desktoptodo\ai-inbox\<id>.json` 收件箱；桌面端每秒 drain，按 id 去重后合并进 `data.json`。
 - 桌面端未运行时收件箱保留，下次启动合并；不监听端口、不联网。
 - 列表给 AI 待办显示来源标签；未知 provider 按通用字段解析。
 - 字段适配集中在 `src-tauri/src/ai/providers.rs` 的 `PROVIDERS`，新增客户端只加一条配置。
@@ -253,7 +253,7 @@ powershell -ExecutionPolicy Bypass -File tests\regression.ps1
 - 数据：名言 1313 条、无重复、字段完整
 - UI 集成：50 条，覆盖待办、设置、字体颜色、透明度、天气、日历、节假日、导出、边缘隐藏、托盘、吸附、AI 插入、损坏数据保护、编辑态保护、只读解除、双击与撤销
 - 当前结果：**160 passed / 0 failed / 0 skipped**（fix/code-review 分支）
-- 测试会自动备份/恢复 `%USERPROFILE%\.desktoptodo\data.json`，结束后重启常驻程序；发现残留备份会中止，避免覆盖用户数据。REG-46 通过 `DESKTOP_TODO_DATA_DIR` 使用临时目录，不碰真实数据。
+- 测试会自动备份/恢复 `%LOCALAPPDATA%\desktoptodo\data.json`，结束后重启常驻程序；发现残留备份会中止，避免覆盖用户数据。REG-46 通过 `DESKTOP_TODO_DATA_DIR` 使用临时目录，不碰真实数据。
 - UI 测试通过 WebView2 CDP（端口 9222）在真实应用里执行；集成脚本超过 32KB，统一用临时文件传给 CDP。
 
 维护规则：

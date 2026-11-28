@@ -1,4 +1,4 @@
-/* 桌面待办 —— 每日一句选择规则（纯函数） */
+/* Tiny·待办事项 —— 每日一句选择规则（纯函数） */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;

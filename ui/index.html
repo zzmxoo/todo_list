@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>桌面待办</title>
+<title>Tiny·待办事项</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -308,9 +308,14 @@
 
           <section class="set-page" data-page="about">
             <div class="about-box">
-              <div class="about-name">桌面待办</div>
+              <div class="about-name">Tiny·待办事项</div>
               <div class="about-version">版本 <span id="aboutVersion">--</span></div>
-              <div class="about-actions" id="aboutActions" hidden></div>
+              <div class="about-actions" id="aboutActions">
+                <button class="btn small" id="aboutPrivacy" type="button">隐私政策</button>
+                <button class="btn small" id="aboutRepo" type="button">GitHub 仓库</button>
+                <button class="btn small ghost" id="aboutLicense" type="button">MIT 协议</button>
+              </div>
+              <div class="about-copy" id="aboutCopy">MIT License · 数据仅保存在本机</div>
             </div>
           </section>
         </div>

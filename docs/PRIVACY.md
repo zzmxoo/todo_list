@@ -1,19 +1,19 @@
-# 桌面待办 · 隐私政策
+# Tiny·待办事项 · 隐私政策
 
-- 运营者：桌面待办开发者
+- 运营者：Tiny·待办事项 开发者
 - 联系方式：GitHub Issues（https://github.com/zzmxoo/todo_list/issues）
 
 最后更新：2026-11-26
 
 ## 一、总述
 
-「桌面待办」（以下简称"本应用"）是一个 Windows 桌面待办事项小组件。我们的核心设计原则是**数据尽量留在你自己的电脑上**：待办内容、设置项均由本应用直接保存在本机，不经由我们的服务器存储或处理。
+「Tiny·待办事项」（以下简称"本应用"）是一个 Windows 桌面待办事项小组件。我们的核心设计原则是**数据尽量留在你自己的电脑上**：待办内容、设置项均由本应用直接保存在本机，不经由我们的服务器存储或处理。
 
 本应用**没有**用户账号系统，**没有**任何统计分析、崩溃上报或广告 SDK，也**不会**将你的待办内容上传到任何地方。
 
 ## 二、我们在本机存储的信息
 
-以下信息保存在你的电脑上。主数据与 AI 收件箱都在 `%USERPROFILE%\.desktoptodo\`；旧版本数据在 `%APPDATA%\com.desktoptodo.widget\`，首次启动会自动迁移到新目录。我们无法访问这些数据。商店（MSIX）版不会再被 AppData 虚拟化劈成两份。
+以下信息保存在你的电脑上。主数据与 AI 收件箱都在 `%LOCALAPPDATA%\desktoptodo\`；旧版本数据在 `%USERPROFILE%\.desktoptodo\` 或 `%APPDATA%\com.desktoptodo.widget\`，首次启动会自动迁移到新目录。我们无法访问这些数据。
 
 | 数据 | 内容 | 用途 |
 | --- | --- | --- |
@@ -25,7 +25,7 @@
 
 **关于定位**：点击“定位”后，IP 定位会直接向下列第三方服务发起请求，不会触发系统授权弹窗；只有 GPS 定位才会请求系统授权。坐标仅用于向下述第三方天气服务查询天气，并保存在本机。你可以随时在设置中改填城市名，或清除定位信息。
 
-**删除数据**：本应用不提供云同步，卸载应用后上述数据仍保留在上述目录中。你可以手动删除 `%USERPROFILE%\.desktoptodo\` 文件夹以彻底清除；若从旧版本升级，旧目录 `%APPDATA%\com.desktoptodo.widget\` 也可一并删除。由于我们不在服务器保存任何用户数据，因此你没有需要向我们申请删除的数据。
+**删除数据**：本应用不提供云同步，卸载应用后上述数据仍保留在上述目录中。你可以手动删除 `%LOCALAPPDATA%\desktoptodo\` 文件夹以彻底清除；若从旧版本升级，旧目录 `%USERPROFILE%\.desktoptodo\` 与 `%APPDATA%\com.desktoptodo.widget\` 也可一并删除。由于我们不在服务器保存任何用户数据，因此你没有需要向我们申请删除的数据。
 
 ## 三、会向第三方发送什么信息
 
@@ -38,7 +38,6 @@
 | OpenStreetMap Nominatim | `nominatim.openstreetmap.org` | 经纬度坐标 | 把坐标反查为城市名 |
 | BigDataCloud | `api.bigdatacloud.net` | IP 地址（由服务端看到） | IP 定位、逆地理编码 |
 | ipwho.is | `ipwho.is` | IP 地址（由服务端看到） | IP 定位备用服务 |
-| ip-api | `http://ip-api.com`（明文 HTTP） | IP 地址（由服务端看到） | IP 定位备用服务 |
 | jsDelivr CDN | `cdn.jsdelivr.net` | 无（仅按年份请求法定节假日数据文件） | 获取节假日数据 |
 
 这些请求会携带常规的网络信息（如 IP 地址、应用标识 User-Agent），这是任何联网请求都无法避免的。各第三方服务对这些信息的处理受其自身隐私政策约束，建议你查阅：
@@ -85,7 +84,7 @@
 
 如对本政策有疑问，或需要行使上述权利，请联系：
 
-- 运营者：桌面待办开发者
+- 运营者：Tiny·待办事项 开发者
 - 联系方式：GitHub Issues（https://github.com/zzmxoo/todo_list/issues）
 
 我们会在合理期限内回复。

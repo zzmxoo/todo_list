@@ -5,6 +5,7 @@
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1
+#   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -SkipWebView2   # 不打包固定版 WebView2（仅本地联调）
 #   $env:MSIX_CERT_PASSWORD = '...'
 #   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -Pfxn <证书.pfx>
 #
@@ -14,10 +15,12 @@ param(
   [string]$Exe,
   [string]$Pfxn,
   [string]$Password = $env:MSIX_CERT_PASSWORD,
-  [string]$Publisher = 'CN=DesktopTodo',
-  [string]$PublisherDisplayName = 'DesktopTodo',
-  [string]$IdentityName = '',
-  [string]$OutDir
+  # 真实包身份不入库：通过参数或环境变量注入（CI 用仓库 Variables）。
+  [string]$Publisher = $env:MSIX_PUBLISHER,
+  [string]$PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME,
+  [string]$IdentityName = $env:MSIX_IDENTITY_NAME,
+  [string]$OutDir,
+  [switch]$SkipWebView2
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -42,8 +45,11 @@ $signtool = Join-Path $sdkBin 'signtool.exe'
 $conf = Get-Content (Join-Path $crateDir 'tauri.conf.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $conf.version
 $displayName = $conf.productName
-if (-not $IdentityName) { $IdentityName = $conf.identifier }
-if (-not $PublisherDisplayName) { $PublisherDisplayName = $conf.productName }
+
+# 包身份必须显式提供：真实值不写入仓库，避免公开开发者姓名/账号标识。
+if (-not $IdentityName -or -not $Publisher -or -not $PublisherDisplayName) {
+  throw '缺少包身份：请用 -IdentityName / -Publisher / -PublisherDisplayName，或设置环境变量 MSIX_IDENTITY_NAME / MSIX_PUBLISHER / MSIX_PUBLISHER_DISPLAY_NAME'
+}
 
 # MSIX Version 必须是四段 (Major.Minor.Build.Revision)。商店规则：
 #   - 第四段（revision）保留给商店使用，构建时必须为 0
@@ -59,12 +65,9 @@ foreach ($seg in $parts) {
   }
 }
 $major = [int]$parts[0]
-if ($major -ge 1) {
-  Write-Warning "MSIX 版本映射仅支持 0.x.y（当前 $version）；跳过 MSIX，exe 安装包照常发布"
-  if ($env:GITHUB_OUTPUT) { 'skip=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append }
-  return $null
-}
-if ($major -eq 0) { $major = 1 }  # 商店要求第一段不能为 0
+# 商店规则：第一段不能为 0；第四段（revision）保留给商店使用，构建时必须为 0。
+# semver 的 0.x.y 提升为 1.x.y.0；1.x.y 及以上直接映射为 major.minor.patch.0，不再跳过。
+if ($major -eq 0) { $major = 1 }
 $msixVersion = '{0}.{1}.{2}.0' -f $major, [int]$parts[1], [int]$parts[2]
 Write-Host "package version: $msixVersion (from $version; revision fixed to 0 for Store)"
 
@@ -76,6 +79,54 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage 'Assets') | Out-Null
 # 主程序
 Copy-Item $Exe (Join-Path $stage 'desktop-todo.exe') -Force
 Write-Host "exe copied: $([math]::Round((Get-Item $Exe).Length/1MB,2)) MB"
+
+# Fixed Version WebView2：随包携带，放在 exe 旁的 WebView2\ 目录。
+# Rust 侧启动时检测该目录并设置 WEBVIEW2_BROWSER_EXECUTABLE_FOLDER，
+# 避免 Windows 10 没装 Evergreen 运行时导致白屏。商店提交前不应跳过。
+if (-not $SkipWebView2) {
+  $wvStage = Join-Path $stage 'WebView2'
+  New-Item -ItemType Directory -Force -Path $wvStage | Out-Null
+  try {
+    Write-Host 'resolving fixed WebView2 runtime download url ...'
+    $page = Invoke-WebRequest -Uri 'https://developer.microsoft.com/en-us/microsoft-edge/webview2/' -UseBasicParsing -TimeoutSec 90
+    # 页面把链接 JSON 转义成 https:\u002F\u002F...，先按转义形式匹配，再解码。
+    $match = [regex]::Match(
+      $page.Content,
+      'https:\\u002F\\u002Fmsedge\.sf\.dl\.delivery\.mp\.microsoft\.com\\u002Ffilestreamingservice\\u002Ffiles\\u002F[A-Za-z0-9\-]+\\u002FMicrosoft\.WebView2\.FixedVersionRuntime\.[0-9.]+\.x64\.cab'
+    )
+    if (-not $match.Success) { throw '在 WebView2 下载页未解析到 x64 Fixed Version CAB 链接' }
+    $wvUrl = [System.Text.RegularExpressions.Regex]::Unescape($match.Value)
+    $wvCab = Join-Path $OutDir 'WebView2Fixed.x64.cab'
+    Write-Host "downloading $wvUrl"
+    Invoke-WebRequest -Uri $wvUrl -OutFile $wvCab -UseBasicParsing -TimeoutSec 900
+
+    $wvTemp = Join-Path $OutDir 'wv2-temp'
+    if (Test-Path $wvTemp) { Remove-Item $wvTemp -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $wvTemp | Out-Null
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (Test-Path $tar) {
+      & $tar -xf $wvCab -C $wvTemp
+      if ($LASTEXITCODE -ne 0) { throw "tar 解压 WebView2 CAB 失败 ($LASTEXITCODE)" }
+    } else {
+      & (Join-Path $env:SystemRoot 'System32\expand.exe') $wvCab -F:* $wvTemp | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw 'expand 解压 WebView2 CAB 失败' }
+    }
+    Remove-Item $wvCab -Force -ErrorAction SilentlyContinue
+    # CAB 内有一层以版本号命名的目录；把内容平铺进 stage\WebView2。
+    $inner = Get-ChildItem $wvTemp -Directory | Select-Object -First 1
+    $srcDir = if ($inner) { $inner.FullName } else { $wvTemp }
+    Copy-Item (Join-Path $srcDir '*') $wvStage -Recurse -Force
+    Remove-Item $wvTemp -Recurse -Force -ErrorAction SilentlyContinue
+  } catch {
+    throw "WebView2 固定版运行时打包失败：$($_.Exception.Message)。网络受限时可加 -SkipWebView2（商店提交前不应跳过）"
+  }
+  if (-not (Test-Path (Join-Path $wvStage 'msedgewebview2.exe'))) {
+    throw '解压后未找到 msedgewebview2.exe，MSIX 缺少固定版 WebView2'
+  }
+  Write-Host 'webview2 fixed runtime bundled'
+} else {
+  Write-Host '已跳过 Fixed Version WebView2（商店提交前不建议）'
+}
 
 # 资源：从 icons\msix 复制并补齐清单引用的其它尺寸
 $iconSrc = Join-Path $crateDir 'icons\msix'
@@ -121,7 +172,7 @@ foreach ($name in $need.Keys) {
 $tpl = Get-Content (Join-Path $crateDir 'msix\Package.appxmanifest.template.xml') -Raw -Encoding UTF8
 # Tauri v2 的 bundle 配置里字段名是 shortDescription / longDescription，
 # 没有 description（那个是 fileAssociations 下的）
-$desc = if ($conf.bundle.shortDescription) { $conf.bundle.shortDescription } else { '桌面待办小工具' }
+$desc = if ($conf.bundle.shortDescription) { $conf.bundle.shortDescription } else { 'Tiny·待办事项' }
 
 # 身份与名称校验：错误要在这里暴露，而不是等到 makeappx 报难懂的 XML 错误
 if ($IdentityName -notmatch '^[-_.A-Za-z0-9]{3,50}$') {

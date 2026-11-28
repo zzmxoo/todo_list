@@ -1252,6 +1252,19 @@ body.calendar-mode .cal-weather {
   color: var(--dim);
 }
 
+.about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.about-copy {
+  margin-top: 10px;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
 /* AI 接入页 */
 .ai-intro {
   font-size: 10.5px;

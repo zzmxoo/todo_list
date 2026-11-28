@@ -7,7 +7,7 @@ use super::write_json_atomic;
 
 const PLUGIN_NAME: &str = "desktop-todo";
 const PLUGIN_DESCRIPTION: &str =
-    "待办事项：通过 MCP 把待办、提醒和会议写入桌面待办小组件。";
+    "待办事项：通过 MCP 把待办、提醒和会议写入 Tiny·待办事项 小组件。";
 
 pub fn generic_config(exe: &Path) -> String {
     let value = json!({

@@ -37,50 +37,10 @@ impl Drop for TimerPrecision {
     }
 }
 
-fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // 与 CLI/MCP 共用不受 MSIX 虚拟化影响的用户目录。
-    let dir = ai::data_dir()?;
-    // 首次升级时把旧 AppData 里的 data.json 复制到新位置（测试目录不迁移）。
-    let marker = dir.join(".migrated-from-appdata");
-    if ai::data_dir_override().is_none()
-        && !dir.join("data.json").exists()
-        && !marker.exists()
-    {
-        // 已有损坏备份时绝不能拿旧副本复活陈旧数据。
-        let has_corrupt = fs::read_dir(&dir)
-            .map(|entries| {
-                entries.flatten().any(|entry| {
-                    entry
-                        .file_name()
-                        .to_str()
-                        .map(|name| name.starts_with("data.json.corrupt-"))
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-        if !has_corrupt {
-            if let Ok(old) = app.path().app_data_dir() {
-                let old_file = old.join("data.json");
-                if old != dir && old_file.exists() {
-                    fs::copy(&old_file, dir.join("data.json")).map_err(|e| {
-                        format!(
-                            "迁移旧数据失败：{e}；旧文件仍在 {}，请复制到 {} 后重试",
-                            old_file.display(),
-                            dir.display()
-                        )
-                    })?;
-                    let _ = fs::write(&marker, "migrated");
-                    let _ = fs::rename(&old_file, old_file.with_extension("json.migrated"));
-                }
-            }
-        }
-    }
-    // 新目录已有数据时也记下迁移标记：以后即使 data.json 丢失，也不能拿旧副本复活。
-    if ai::data_dir_override().is_none() && dir.join("data.json").exists() && !marker.exists() {
-        let _ = fs::write(&marker, "present");
-    }
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir)
+fn data_dir(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // 主数据、旧目录迁移与 MSIX 包身份下的真实路径都收敛在 ai::data_dir()，
+    // 保证 GUI 与 --mcp / --add 外部进程读写同一份 data.json。
+    ai::data_dir()
 }
 
 #[tauri::command]
@@ -164,6 +124,32 @@ fn reveal_data_dir(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(not(windows))]
     {
         let _ = dir;
+        Err("仅支持 Windows".into())
+    }
+}
+
+/// 用系统默认浏览器打开 http/https 链接（设置页「隐私政策 / GitHub 仓库 / MIT 协议」）。
+/// 具体链接由前端传入，这里只做协议白名单校验，避免被用于打开任意协议。
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(&url).map_err(|_| "链接格式不正确".to_string())?;
+    if !(parsed.scheme() == "http" || parsed.scheme() == "https") {
+        return Err("仅支持 http/https 链接".into());
+    }
+    #[cfg(windows)]
+    {
+        let explorer = std::env::var_os("SystemRoot")
+            .map(|root| PathBuf::from(root).join("explorer.exe"))
+            .unwrap_or_else(|| PathBuf::from("explorer.exe"));
+        std::process::Command::new(explorer)
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = url;
         Err("仅支持 Windows".into())
     }
 }
@@ -616,7 +602,7 @@ async fn get_autostart() -> Result<bool, String> {
     #[cfg(windows)]
     {
         // 包身份下注册表方案不生效，直接报告为关闭，避免界面显示与实际不符
-        if has_package_identity() {
+        if ai::has_package_identity() {
             return Ok(false);
         }
         let output = tokio::time::timeout(
@@ -643,30 +629,11 @@ async fn get_autostart() -> Result<bool, String> {
     }
 }
 
-/// 判断当前进程是否运行在 MSIX 包身份下。
-///
-/// 打包运行时写 HKCU\...\Run 会被 Windows 的应用虚拟化重定向到
-/// 每个应用私有的 hive，系统的登录启动机制看不到，开机自启会静默失效。
-/// 这种情况必须走 StartupTask API，不能沿用注册表方案。
-#[cfg(windows)]
-fn has_package_identity() -> bool {
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetCurrentPackageFullName(len: *mut u32, name: *mut u16) -> i32;
-    }
-    // 传空缓冲区时打包进程返回 ERROR_INSUFFICIENT_BUFFER(122)，
-    // 未打包进程返回 APPMODEL_ERROR_NO_PACKAGE(15700)；其它错误不能当成「已打包」。
-    const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
-    let mut len: u32 = 0;
-    let rc = unsafe { GetCurrentPackageFullName(&mut len, std::ptr::null_mut()) };
-    rc == ERROR_INSUFFICIENT_BUFFER || rc == 0
-}
-
 #[tauri::command]
 async fn set_autostart(enabled: bool) -> Result<bool, String> {
     #[cfg(windows)]
     {
-        if has_package_identity() {
+        if ai::has_package_identity() {
             return Err("商店版暂不支持开机自启，请使用安装版（NSIS）".into());
         }
         if enabled {
@@ -739,7 +706,7 @@ fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         .ok_or("missing default window icon")?;
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .tooltip("桌面待办")
+        .tooltip("Tiny·待办事项")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -841,7 +808,7 @@ fn already_running() -> bool {
             #[cfg(not(feature = "test-data-dir"))]
             show_message(
                 "单实例保护不可用，为避免两个实例互相覆盖数据，本次不启动。",
-                "桌面待办",
+                "Tiny·待办事项",
             );
             // 无法确认是否已有实例时，宁可不启动，也不冒险双开写坏 data.json。
             return true;
@@ -876,9 +843,29 @@ fn show_message(text: &str, caption: &str) {
 #[cfg(all(windows, not(feature = "test-data-dir")))]
 fn notify_already_running() {
     show_message(
-        "桌面待办已经在运行（可能在另一个 Windows 会话、托盘或任务栏）。",
-        "桌面待办",
+        "Tiny·待办事项已经在运行（可能在另一个 Windows 会话、托盘或任务栏）。",
+        "Tiny·待办事项",
     );
+}
+
+/// MSIX 包会随包携带 Fixed Version WebView2（放在 exe 旁的 WebView2\ 目录）。
+/// 检测到该目录时把加载路径钉到固定版运行时，避免机器没装 Evergreen 时白屏；
+/// 普通安装版（NSIS）没有该目录，继续走系统 Evergreen 运行时。
+#[cfg(windows)]
+fn setup_fixed_webview2() {
+    if std::env::var_os("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER").is_some() {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    let runtime = dir.join("WebView2");
+    if runtime.join("msedgewebview2.exe").exists() {
+        std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", &runtime);
+    }
 }
 
 fn main() {
@@ -902,6 +889,10 @@ fn main() {
         return;
     }
 
+    // 必须在创建 WebView 前设置，MSIX 固定版 WebView2 才能生效。
+    #[cfg(windows)]
+    setup_fixed_webview2();
+
     let result = tauri::Builder::default()
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -922,7 +913,7 @@ fn main() {
             if let Err(err) = build_tray(app.handle()) {
                 eprintln!("tray init failed: {err}");
                 #[cfg(windows)]
-                show_message(&format!("托盘初始化失败：{err}"), "桌面待办");
+                show_message(&format!("托盘初始化失败：{err}"), "Tiny·待办事项");
             }
             Ok(())
         })
@@ -931,6 +922,7 @@ fn main() {
             save_state,
             get_ai_setup,
             reveal_data_dir,
+            open_url,
             left_button_down,
             drain_ai_todos,
             pick_image,
@@ -948,7 +940,7 @@ fn main() {
     if let Err(err) = result {
         eprintln!("failed to run desktop todo widget: {err}");
         #[cfg(windows)]
-        show_message(&format!("启动失败：{err}"), "桌面待办");
+        show_message(&format!("启动失败：{err}"), "Tiny·待办事项");
         std::process::exit(1);
     }
 }

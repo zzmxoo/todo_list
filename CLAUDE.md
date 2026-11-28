@@ -1,6 +1,6 @@
-# 桌面待办（D:\Tools\Todos）
+# Tiny·待办事项（D:\Tools\Todos）
 
-Tauri v2 + WebView2 的 Windows 桌面待办小组件。前端是 `ui/` 下的纯 HTML/CSS/JS（无 Node 构建），Rust 命令在 `src-tauri/src/main.rs`。
+Tauri v2 + WebView2 的 Windows 待办事项小组件（Tiny·待办事项）。前端是 `ui/` 下的纯 HTML/CSS/JS（无 Node 构建），Rust 命令在 `src-tauri/src/main.rs`。
 
 后续会话先读 [docs/HANDOFF.md](docs/HANDOFF.md)：包含原始需求、设计规范、关键决策、已知限制和发布流程。AI 接入（MCP / CLI / 收件箱）见 [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md)，实现集中在 `src-tauri/src/ai/`。
 
@@ -37,4 +37,4 @@ powershell -ExecutionPolicy Bypass -File tests\integration.ps1
 - 日常小改动只做针对性验证（相关单测/单条集成用例/手动确认），不要每次全量回归。
 - **合入 master、打 tag、发版前必须跑一次完整 `tests\regression.ps1`**，失败不允许合并或打 tag。
 - 待办写操作统一走 `app.js` 的 `commitTodos()`；业务纯函数放 `ui/core.js` 与 `ui/domain/*`，不要塞回 DOM 代码。
-- 用户数据在 `%APPDATA%\com.desktoptodo.widget\data.json`。测试会临时改动它，`regression.ps1` 负责恢复；手动调试时不要删除用户数据。
+- 用户数据在 `%LOCALAPPDATA%\desktoptodo\data.json`（旧目录 `%USERPROFILE%\.desktoptodo\` 与 `%APPDATA%\com.desktoptodo.widget\` 首次启动自动迁移）。测试会临时改动它，`regression.ps1` 负责恢复；手动调试时不要删除用户数据。

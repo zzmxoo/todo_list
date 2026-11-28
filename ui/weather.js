@@ -1,4 +1,4 @@
-/* 桌面待办 —— 天气数据模块：识别并解析和风 / 彩云 / uapis.cn / Open-Meteo */
+/* Tiny·待办事项 —— 天气数据模块：识别并解析和风 / 彩云 / uapis.cn / Open-Meteo */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -335,9 +335,8 @@
 
   /**
    * IP 定位服务列表，按可靠性与准确性排序，调用方依次尝试直到成功。
-   * 都不需要 API Key。
+   * 都无需 API Key，且全部走 HTTPS（商店上架对明文传输有限制）。
    * - bigdatacloud：实测判断最准（与真实位置一致），但较慢
-   * - ip-api：最快（约 1s）且准确，仅有 HTTP 端点（免费版不支持 HTTPS）
    * - ipwho.is：HTTPS 且快，但 IP 库精度较差（实测偏差数百公里），兜底用
    */
   const IP_LOCATE_SOURCES = [
@@ -346,12 +345,6 @@
       url: "https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=zh",
       city: (d) => d.city || d.principalSubdivision || d.locality,
       coords: (d) => [d.latitude, d.longitude],
-    },
-    {
-      name: "ip-api",
-      url: "http://ip-api.com/json/?lang=zh-CN&fields=status,city,regionName,lat,lon",
-      city: (d) => (d.status === "fail" ? "" : d.city || d.regionName),
-      coords: (d) => [d.lat, d.lon],
     },
     {
       name: "ipwho.is",

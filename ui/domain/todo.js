@@ -1,4 +1,4 @@
-/* 桌面待办 —— 待办领域规则（纯函数，不碰 DOM / 存储） */
+/* Tiny·待办事项 —— 待办领域规则（纯函数，不碰 DOM / 存储） */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;

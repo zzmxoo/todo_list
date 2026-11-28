@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "桌面待办",
+  "productName": "Tiny·待办事项",
   "version": "0.0.10",
   "identifier": "com.desktoptodo.widget",
   "build": {
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "桌面待办",
+        "title": "Tiny·待办事项",
         "width": 400,
         "height": 360,
         "minWidth": 300,
@@ -34,9 +34,10 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
+          "$LOCALDATA/desktoptodo/**",
+          "$HOME/AppData/Local/desktoptodo/**",
           "$APPDATA/com.desktoptodo.widget/**",
-          "$APPLOCALDATA/com.desktoptodo.widget/**",
-          "$HOME/.desktoptodo/**"
+          "$APPLOCALDATA/com.desktoptodo.widget/**"
         ]
       }
     }

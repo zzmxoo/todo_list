@@ -1,4 +1,4 @@
-/* 桌面待办 —— 节假日规则（纯函数） */
+/* Tiny·待办事项 —— 节假日规则（纯函数） */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;

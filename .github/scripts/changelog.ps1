@@ -97,7 +97,7 @@ function Format-Item([string]$text) {
 
 # --- 拼装正文 ---------------------------------------------------------------
 $lines = New-Object System.Collections.Generic.List[string]
-$lines.Add("## 桌面待办 $version")
+$lines.Add("## Tiny·待办事项 $version")
 $lines.Add('')
 if ($isFirst) {
   $lines.Add('> 首个发布版本')

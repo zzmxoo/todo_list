@@ -1,4 +1,4 @@
-/* 桌面待办 —— 日历模型（纯函数：事项区间、每周片段、整月周结构） */
+/* Tiny·待办事项 —— 日历模型（纯函数：事项区间、每周片段、整月周结构） */
 (function (root, factory) {
   const hasRequire = typeof require === "function";
   const api = factory(
