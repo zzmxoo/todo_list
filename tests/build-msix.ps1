@@ -5,10 +5,12 @@
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1
-#   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -SkipWebView2   # 不打包固定版 WebView2（仅本地联调）
+#   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -BundleWebView2   # 离线分发：把固定版 WebView2 打进包（+约 430MB）
 #   $env:MSIX_CERT_PASSWORD = '...'
 #   powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -Pfxn <证书.pfx>
 #
+# 默认不打包 WebView2：清单里声明了 win32dependencies:ExternalDependency(Microsoft.WebView2)，
+# 商店 / App Installer 安装时会自动装运行时；包体约 10MB。离线/非 App Installer 场景可用 -BundleWebView2。
 # 口令优先读环境变量 MSIX_CERT_PASSWORD，避免出现在命令行参数里（同机可被 WMI 读到）。
 # 不传证书也能打出未签名包（供 Partner Center 或本地 sideload 测试用）。
 param(
@@ -20,7 +22,7 @@ param(
   [string]$PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME,
   [string]$IdentityName = $env:MSIX_IDENTITY_NAME,
   [string]$OutDir,
-  [switch]$SkipWebView2
+  [switch]$BundleWebView2
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -80,10 +82,10 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage 'Assets') | Out-Null
 Copy-Item $Exe (Join-Path $stage 'desktop-todo.exe') -Force
 Write-Host "exe copied: $([math]::Round((Get-Item $Exe).Length/1MB,2)) MB"
 
-# Fixed Version WebView2：随包携带，放在 exe 旁的 WebView2\ 目录。
-# Rust 侧启动时检测该目录并设置 WEBVIEW2_BROWSER_EXECUTABLE_FOLDER，
-# 避免 Windows 10 没装 Evergreen 运行时导致白屏。商店提交前不应跳过。
-if (-not $SkipWebView2) {
+# Fixed Version WebView2：默认不打进包（清单 ExternalDependency 会在安装时自动部署），
+# 只有 -BundleWebView2 时才随包携带，放在 exe 旁的 WebView2\ 目录。
+# Rust 侧启动时检测该目录并设置 WEBVIEW2_BROWSER_EXECUTABLE_FOLDER。
+if ($BundleWebView2) {
   $wvStage = Join-Path $stage 'WebView2'
   New-Item -ItemType Directory -Force -Path $wvStage | Out-Null
   try {
@@ -118,14 +120,14 @@ if (-not $SkipWebView2) {
     Copy-Item (Join-Path $srcDir '*') $wvStage -Recurse -Force
     Remove-Item $wvTemp -Recurse -Force -ErrorAction SilentlyContinue
   } catch {
-    throw "WebView2 固定版运行时打包失败：$($_.Exception.Message)。网络受限时可加 -SkipWebView2（商店提交前不应跳过）"
+    throw "WebView2 固定版运行时打包失败：$($_.Exception.Message)。如无网络可去掉 -BundleWebView2 改用外部依赖。"
   }
   if (-not (Test-Path (Join-Path $wvStage 'msedgewebview2.exe'))) {
     throw '解压后未找到 msedgewebview2.exe，MSIX 缺少固定版 WebView2'
   }
   Write-Host 'webview2 fixed runtime bundled'
 } else {
-  Write-Host '已跳过 Fixed Version WebView2（商店提交前不建议）'
+  Write-Host '未打包 WebView2：依赖清单 ExternalDependency / 系统 Evergreen（包体约 10MB）'
 }
 
 # 资源：从 icons\msix 复制并补齐清单引用的其它尺寸

@@ -14,12 +14,12 @@ Tauri v2 的 `BundleType` 枚举只有 `deb / rpm / appimage / msi / nsis / app 
 cd src-tauri
 cargo build --release
 
-# 打包（未签名，供 Partner Center 提交）。脚本会联网下载并随包打入
-# Fixed Version WebView2（约 150–200MB），见下文的「WebView2」。
+# 打包（未签名，供 Partner Center 提交）。默认不打包 WebView2，包体约 10MB；
+# 清单里的 ExternalDependency 会让商店安装时自动部署 WebView2 运行时。
 powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1
 
-# 本地联调只想快速打一个不含 WebView2 的包（正式提交前不要这样做）：
-powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -SkipWebView2
+# 需要离线分发时才把固定版 WebView2 打进包（约 +430MB）：
+powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -BundleWebView2
 
 # 本地测试用：用自签证书签名后安装
 powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -Pfxn .\cert.pfx -Password <密码>
@@ -31,7 +31,7 @@ powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 -Pfxn .\cert.pfx -
 - 从 `tauri.conf.json` 读取版本号，转成商店要求格式：`0.0.7` → `1.0.7.0`
   - 商店规则：第四段（revision）保留给商店，**构建时必须为 0**；第一段**不能为 0**
   - semver 的 major=0 会提升为 1；`1.x.y` 及以上直接映射为 `major.minor.patch.0`，**不会跳过**
-- 下载并解压 Fixed Version WebView2 到 `stage\WebView2\`（Rust 启动时自动指向它）
+- 默认不打包 WebView2；`-BundleWebView2` 时才下载并解压固定版到 `stage\WebView2\`
 - 从 `src-tauri/icons/msix/` 复制并补齐清单引用的全部资源尺寸
 - 填充 `src-tauri/msix/Package.appxmanifest.template.xml`，并对所有值做 XML 转义
 - 校验 `IdentityName` 只含 `A-Za-z0-9._-`（中文会被 makeappx 拒绝）
@@ -84,17 +84,24 @@ powershell -ExecutionPolicy Bypass -File tests\build-msix.ps1 `
 | **WebView2** | 见下文「Fixed Version WebView2」 |
 | **版本映射** | `0.0.10` → `1.0.10.0`；`1.x.y` 不再被跳过，直接映射为 `1.x.y.0` |
 
-### Fixed Version WebView2
+### WebView2 运行时
 
-MSIX 不包含 WebView2 运行时，Windows 10（19041+）上可能没装 Evergreen 运行时导致白屏。
-因此 `build-msix.ps1` 会从 Microsoft 官方下载页解析并下载 x64 固定版运行时 CAB，
-解压到包内 `WebView2\` 目录（在 `desktop-todo.exe` 旁）。Rust 侧 `setup_fixed_webview2()`
-启动时检测该目录并设置 `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER`，让 Tauri/WebView2 加载包内运行时；
-普通安装版（NSIS）没有该目录，继续使用系统 Evergreen 运行时。
+MSIX 默认**不打包** WebView2（包体约 10MB）。清单里声明了官方外部依赖：
 
-- 固定版运行时不自动更新，发版时重新打包即可换新版本。
-- 包体会因此增大约 150–200MB，属于固定版的正常代价。
-- 本地联调可用 `-SkipWebView2` 跳过；**提交商店前不应跳过**。
+```xml
+<win32dependencies:ExternalDependency
+  Name="Microsoft.WebView2"
+  Publisher="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+  MinVersion="1.1.1.1"
+  Optional="true" />
+```
+
+- **商店 / Microsoft App Installer 安装时**会自动检查并部署 WebView2 运行时（这是微软允许的唯一外部依赖）。
+- 该依赖只对 App Installer 安装路径生效；用 `Add-AppxPackage`、PowerShell、Intune 等方式安装时会被忽略。
+- 因此应用启动时还有兜底检测（`webview2_available()`）：运行时缺失时弹窗提示并提供官方下载页链接，避免白屏。
+- 需要离线分发时，可用 `-BundleWebView2` 把固定版运行时打进包（约 +430MB），Rust 侧会自动设置 `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` 指向包内 `WebView2\`。
+
+参考：[win32dependencies:ExternalDependency 官方文档](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-win32dependencies-externaldependency)
 
 ### 需要在 Partner Center 如实申报
 

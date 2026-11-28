@@ -7,7 +7,8 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap rescap">
+  xmlns:win32dependencies="http://schemas.microsoft.com/appx/manifest/externaldependencies"
+  IgnorableNamespaces="uap rescap win32dependencies">
 
   <Identity
     Name="{{IDENTITY_NAME}}"
@@ -24,6 +25,17 @@
 
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <!--
+      商店 / Microsoft App Installer 安装时自动检查并安装 WebView2 运行时；
+      这样 MSIX 不必打包 945MB 的固定版运行时。Optional=true 让离线安装不因此失败，
+      运行时缺失时由应用启动时的兜底提示处理。
+      参考：win32dependencies:ExternalDependency（WebView2 是目前唯一允许的外部依赖）。
+    -->
+    <win32dependencies:ExternalDependency
+      Name="Microsoft.WebView2"
+      Publisher="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+      MinVersion="1.1.1.1"
+      Optional="true" />
   </Dependencies>
 
   <Resources>

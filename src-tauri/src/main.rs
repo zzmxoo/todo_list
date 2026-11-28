@@ -868,6 +868,86 @@ fn setup_fixed_webview2() {
     }
 }
 
+/// WebView2 运行时是否可用（Evergreen 或随包固定版）。
+///
+/// MSIX 清单里的 ExternalDependency 会在商店/App Installer 安装时自动部署运行时；
+/// 这里只兜底非 App Installer 的安装路径（如 Add-AppxPackage、绿色版），
+/// 避免运行时缺失时创建 WebView 失败/白屏。
+#[cfg(windows)]
+fn webview2_available() -> bool {
+    if let Some(dir) = std::env::var_os("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER") {
+        if PathBuf::from(&dir).join("msedgewebview2.exe").exists() {
+            return true;
+        }
+    }
+    let mut roots: Vec<PathBuf> = Vec::new();
+    let mut push_root = |base: Option<std::ffi::OsString>| {
+        if let Some(base) = base {
+            roots.push(
+                PathBuf::from(base)
+                    .join("Microsoft")
+                    .join("EdgeWebView")
+                    .join("Application"),
+            );
+        }
+    };
+    push_root(std::env::var_os("ProgramFiles(x86)"));
+    push_root(std::env::var_os("ProgramFiles"));
+    // 包身份下 LOCALAPPDATA 会被重定向；真实用户目录用 USERPROFILE 兜底。
+    push_root(std::env::var_os("LOCALAPPDATA"));
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        roots.push(
+            PathBuf::from(home)
+                .join("AppData")
+                .join("Local")
+                .join("Microsoft")
+                .join("EdgeWebView")
+                .join("Application"),
+        );
+    }
+    roots.iter().any(|root| {
+        let Ok(entries) = fs::read_dir(root) else {
+            return false;
+        };
+        entries
+            .flatten()
+            .any(|entry| entry.path().join("msedgewebview2.exe").exists())
+    })
+}
+
+/// 运行时缺失时提示用户安装，并按选择打开官方下载页。
+#[cfg(windows)]
+fn prompt_install_webview2() {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: *mut c_void, text: *const u16, caption: *const u16, flags: u32) -> i32;
+    }
+    const MB_YESNO: u32 = 0x4;
+    const MB_ICONWARNING: u32 = 0x30;
+    const IDYES: i32 = 6;
+    let text = "本程序需要 Microsoft Edge WebView2 运行时。\n\n是否打开官方下载页面？安装后请重新启动本程序。";
+    let caption = "Tiny·待办事项";
+    let text: Vec<u16> = format!("{text}\0").encode_utf16().collect();
+    let caption: Vec<u16> = format!("{caption}\0").encode_utf16().collect();
+    let rc = unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_YESNO | MB_ICONWARNING,
+        )
+    };
+    if rc == IDYES {
+        let explorer = std::env::var_os("SystemRoot")
+            .map(|root| PathBuf::from(root).join("explorer.exe"))
+            .unwrap_or_else(|| PathBuf::from("explorer.exe"));
+        let _ = std::process::Command::new(explorer)
+            .arg("https://developer.microsoft.com/microsoft-edge/webview2/consumer/")
+            .spawn();
+    }
+}
+
 fn main() {
     // MCP / CLI 模式不启动窗口：AI 工具通过 stdio 或命令行写入待办。
     let args: Vec<String> = std::env::args().collect();
@@ -892,6 +972,13 @@ fn main() {
     // 必须在创建 WebView 前设置，MSIX 固定版 WebView2 才能生效。
     #[cfg(windows)]
     setup_fixed_webview2();
+
+    // 运行时缺失时（非 App Installer 安装路径）给出可操作提示，避免白屏。
+    #[cfg(windows)]
+    if !webview2_available() {
+        prompt_install_webview2();
+        std::process::exit(1);
+    }
 
     let result = tauri::Builder::default()
         .on_window_event(|window, event| {
