@@ -120,7 +120,7 @@ MSIX 不包含 WebView2 运行时，Windows 10（19041+）上可能没装 Evergr
 
 1. ✅ 注册 [Microsoft Partner Center](https://partner.microsoft.com/dashboard) 开发者账号
 2. ✅ 保留应用名称，并已获取产品标识（见上文「产品标识」）
-3. 用内置身份构建 MSIX（已无需改参数）
+3. 本地注入身份构建 MSIX（环境变量或参数，见上文）
 4. 本地跑一遍 WACK（Windows App Certification Kit）：
    ```powershell
    # 安装 Windows SDK 后，appcert.exe 通常在：
@@ -144,16 +144,7 @@ MSIX 不包含 WebView2 运行时，Windows 10（19041+）上可能没装 Evergr
 
 ## CI
 
-`.github/workflows/release.yml` 已加入 MSIX 构建与上传步骤，且排在发布 Release **之前**
-（避免 MSIX 失败留下缺资产的公开 Release）。
-
-仓库 Variables 是真实身份的唯一存放处（不入库），必须在
-**Settings → Secrets and variables → Actions → Variables** 配置，否则 MSIX 步骤会失败：
-
-| 变量 | 填写内容 |
-| --- | --- |
-| `MSIX_IDENTITY_NAME` | Partner Center 的 `Package/Identity/Name` |
-| `MSIX_PUBLISHER` | Partner Center 的 `Package/Identity/Publisher` |
-| `MSIX_PUBLISHER_DISPLAY_NAME` | Partner Center 的开发者显示名称 |
-
-注意：CI 打出的是未签名包，仅用于提交 Partner Center 或本地 sideload（需手动签名）。
+`.github/workflows/release.yml` 只构建并发布 **exe 安装包/便携版**，源码由 GitHub Release 自动附带。
+**MSIX 不随 GitHub Release 发布**：商店包在本地按需构建（注入身份 → 可选签名 → 提交 Partner Center）。
+仓库 Variables 不是 CI 的必需品；本地构建可在 PowerShell 里临时设置环境变量
+`MSIX_IDENTITY_NAME` / `MSIX_PUBLISHER` / `MSIX_PUBLISHER_DISPLAY_NAME`（真实身份不入库）。

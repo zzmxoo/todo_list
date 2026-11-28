@@ -96,36 +96,8 @@ jobs:
           uploadPlainBinary: true
           releaseAssetNamePattern: '[mainBinaryName]_[version][setup].[ext]'
 
-      # MSIX 供 Microsoft Store 上架；Tauri 没有 msix 目标，用 makeappx 手工打包。
-      # 必须放在 draft Release 生成之后：这里才能保证 release exe 已由 tauri-action 构建。
-      # 真实包身份不入库，必须配置仓库 Variables（Settings → Secrets and variables → Actions → Variables）：
-      #   MSIX_IDENTITY_NAME / MSIX_PUBLISHER / MSIX_PUBLISHER_DISPLAY_NAME
-      - name: 生成 MSIX 包
-        id: msix
-        shell: pwsh
-        run: |
-          $id  = '${{ vars.MSIX_IDENTITY_NAME }}'
-          $pub = '${{ vars.MSIX_PUBLISHER }}'
-          $pd  = '${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}'
-          if (-not $id -or -not $pub -or -not $pd) {
-            Write-Host "::error::请在仓库 Variables 配置 MSIX_IDENTITY_NAME / MSIX_PUBLISHER / MSIX_PUBLISHER_DISPLAY_NAME（真实身份不入库）"
-            exit 1
-          }
-          $msixPath = ./tests/build-msix.ps1 -IdentityName $id -Publisher $pub -PublisherDisplayName $pd
-          if (-not $msixPath -or -not (Test-Path -LiteralPath $msixPath)) {
-            Write-Host "::error::未生成 MSIX 安装包"
-            exit 1
-          }
-          "path=$msixPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: 上传 MSIX 到 Release
-        if: steps.msix.outputs.skip != 'true'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MSIX_PATH: ${{ steps.msix.outputs.path }}
-        run: |
-          gh release upload $env:GITHUB_REF_NAME $env:MSIX_PATH --clobber
+      # 发布只提供 exe 安装包/便携版；源码由 GitHub 在 Release 里自动附带。
+      # MSIX 仅供 Microsoft Store 提交，不随 GitHub Release 发布（需要时本地手动打包）。
 
       # 所有资产上传成功后再公开；中途失败时 Release 保持草稿，可直接重跑同一 tag。
       - name: 校验发布资产

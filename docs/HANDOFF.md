@@ -274,7 +274,7 @@ cargo build --release
 
 - 改前端后也必须重新构建，否则 exe 里仍是旧资源。
 - 版本号同时改：`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`desktop-todo` 包）、`src-tauri/tauri.conf.json`。
-- 发布流程：改版本 → 构建 → 跑 `tests\regression.ps1` → 提交 → 打附注 tag。CI 先生成草稿 Release，等 MSIX 等资产全部上传后再公开；中途失败可直接重跑同一 tag。
+- 发布流程：改版本 → 构建 → 跑 `tests\regression.ps1` → 提交 → 打附注 tag。CI 先生成草稿 Release，等 exe 资产上传后再公开；MSIX 不随 Release 发布（商店包在本地构建）。中途失败可直接重跑同一 tag。
 - 当前 tag 命名：`0.0.x`；tag 说明用中文简述本次内容。
 - `bundle.active` 为 `false`，目前没有生成安装包，直接运行 release exe。
 
