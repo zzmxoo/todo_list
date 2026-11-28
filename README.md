@@ -2,6 +2,10 @@
 
 Windows 待办事项小工具（Tiny·待办事项），Tauri 2 + WebView2 实现。深色玻璃拟态界面，无边框、置顶、可拖动。
 
+![演示](docs/images/demo.gif)
+
+截图与演示见 [docs/showcase.md](docs/showcase.md)。
+
 ## 直接运行
 
 ```
@@ -14,6 +18,7 @@ src-tauri\target\release\desktop-todo.exe
 ## 开发文档
 
 - [docs/HANDOFF.md](docs/HANDOFF.md)：项目背景、原始需求、设计规范与约束、架构、版本与后续工作约定（后续会话建议先读）。
+- [docs/showcase.md](docs/showcase.md)：功能截图与演示 GIF。
 - [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md)：DeepSeek Harness / WorkBuddy / 豆包的 MCP 与命令行接入配置。
 - [tests/TESTING.md](tests/TESTING.md)：测试分层与“该写单元还是集成”的判断。
 - [tests/REGRESSION.md](tests/REGRESSION.md)：历史问题与回归用例清单。
